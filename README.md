@@ -1,77 +1,152 @@
-# Building Retrofit Decision Support System (DSS)
+# سیستم پشتیبانی تصمیم برای بازسازی ساختمان (Retrofit DSS)
+
+یک سیستم مدل‌سازی جایگزین (Surrogate) مبتنی بر فیزیک برای پیش‌بینی عملکرد انرژی ساختمان و بهینه‌سازی رتروفیت با استفاده از داده‌های EPC چهار شهر انگلستان.
+
+## Building Retrofit Decision Support System
 
 A physics-based surrogate modeling system for building energy performance prediction and retrofit optimization using UK EPC (Energy Performance Certificate) data from four major English cities.
 
-## Overview
+---
 
-This system addresses the challenge of quickly estimating the effect of physical changes (envelope and systems) on energy consumption and carbon emissions without requiring heavy dynamic simulations. It provides:
+## 📋 فهرست مطالب | Table of Contents
 
-- **Performance Prediction**: Estimate energy consumption, carbon emissions, and costs based on building characteristics
-- **Inverse Design**: Given a target (e.g., 60% carbon reduction), find the optimal combination of retrofit measures
-- **Sensitivity Analysis**: Analyze the impact of changing individual parameters on building performance
+- [مقدمه](#مقدمه--overview)
+- [ویژگی‌ها](#ویژگیها--features)
+- [نصب](#نصب--installation)
+- [استفاده](#استفاده--usage)
+- [خروجی‌های پایان‌نامه](#خروجیهای-پایاننامه--thesis-outputs)
+- [API](#api-endpoints)
+- [عملکرد مدل](#عملکرد-مدل--model-performance)
+- [ساختار پروژه](#ساختار-پروژه--project-structure)
 
-## Features
+---
 
-### Multi-City Data Integration (FR-1)
-- Integrates EPC data from Cambridge, Sheffield, Liverpool, and Boston
-- Accounts for climate variations through Heating Degree Days (HDD)
-- ~650,000 building records with ~2.4 million improvement recommendations
+## مقدمه | Overview
 
-### Physics-Interpretable Models (FR-2)
-- Feature importance aligned with heat transfer principles
-- Envelope quality features (walls, roof, windows) ranked high
-- Physical consistency validation ensures model predictions respect thermodynamic laws
+### مسئله
+دشواری در تخمین سریع اثر تغییرات فیزیکی (پوسته و سیستم) بر مصرف انرژی و کربن بدون نیاز به شبیه‌سازی‌های سنگین دینامیک.
 
-### Load Disaggregation (FR-3)
-- Separate prediction models for:
-  - Heating costs
-  - Hot water costs
-  - Lighting costs
-  - Total annual costs
+### هدف
+ارائه یک موتور بهینه‌سازی که با دریافت هدف انرژی/کربن، ارزان‌ترین و اجرایی‌ترین مشخصات فنی (پوسته، تاسیسات، تجدیدپذیر) را پیشنهاد دهد.
 
-### Retrofit Recommendation Engine (FR-4)
-- Uses EPC recommendations with indicative costs
-- Discrete optimization for finding cost-effective measure combinations
-- Payback period calculations
+### Problem Statement
+Difficulty in quickly estimating the effect of physical changes (envelope and systems) on energy consumption and carbon without heavy dynamic simulations.
 
-## Installation
+### Objective
+Provide an optimization engine that, given energy/carbon targets, suggests the cheapest and most feasible technical specifications (envelope, HVAC, renewables).
+
+---
+
+## ویژگی‌ها | Features
+
+### ✅ الزامات کارکردی پیاده‌سازی شده | Implemented Functional Requirements
+
+| کد | الزام | وضعیت |
+|----|-------|-------|
+| FR-1 | ادغام داده‌های ۴ شهر با اثرات اقلیمی (HDD) | ✅ |
+| FR-2 | تفسیرپذیری فیزیکی (اهمیت ویژگی‌های پوسته) | ✅ |
+| FR-3 | تفکیک بارها (گرمایش، آبگرم، روشنایی) | ✅ |
+| FR-4 | موتور پیشنهاد بر اساس INDICATIVE_COST | ✅ |
+
+### 📊 داده‌های پشتیبانی شده | Supported Data
+
+| شهر | تعداد رکورد | HDD | میانگین انرژی |
+|-----|-------------|-----|---------------|
+| Cambridge | 66,369 | 2,100 | 229 kWh/m² |
+| Boston | 36,812 | 2,250 | 264 kWh/m² |
+| Liverpool | 282,463 | 2,150 | 254 kWh/m² |
+| Sheffield | 261,012 | 2,300 | 265 kWh/m² |
+| **مجموع** | **646,656** | - | - |
+
+---
+
+## نصب | Installation
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd <repository>
+# کلون کردن مخزن
+git clone https://github.com/fena20/inverse-engineering-.git
+cd inverse-engineering-
 
-# Install dependencies
+# نصب وابستگی‌ها
 pip install -r requirements.txt
 ```
 
-## Quick Start
+---
 
-### 1. Train Models
+## استفاده | Usage
+
+### ۱. آموزش مدل‌ها | Train Models
 
 ```bash
 python src/train.py --data-dir data --model-dir models --sample-size 100000
 ```
 
-### 2. Run Example
+### ۲. تولید خروجی‌های پایان‌نامه | Generate Thesis Outputs
+
+```bash
+python src/analysis/thesis_analysis_fast.py
+```
+
+### ۳. اجرای مثال | Run Example
 
 ```bash
 python src/example_usage.py
 ```
 
-### 3. Start API Server
+### ۴. راه‌اندازی API | Start API Server
 
 ```bash
 cd src
 python -m retrofit_dss.api.app
 ```
 
+---
+
+## خروجی‌های پایان‌نامه | Thesis Outputs
+
+تمام نمودارها و جداول مورد نیاز برای پایان‌نامه در پوشه `outputs/thesis_figures/` تولید می‌شوند.
+
+### فصل ۳: تحلیل داده‌ها (EDA)
+
+| فایل | توضیح |
+|------|-------|
+| `fig3_1_city_energy_distribution.png` | توزیع مصرف انرژی در ۴ شهر (Box Plot) |
+| `fig3_2_age_efficiency_heatmap.png` | نمودار حرارتی سن ساختمان vs بازدهی پوسته |
+| `fig3_3_correlation_matrix.png` | ماتریس همبستگی ویژگی‌ها با خروجی‌ها |
+| `table3_1_city_summary.csv` | خلاصه آماری داده‌های هر شهر |
+
+### فصل ۵: نتایج مدل
+
+| فایل | توضیح |
+|------|-------|
+| `fig5_1_actual_vs_predicted.png` | نمودار پراکندگی واقعی vs پیش‌بینی (به تفکیک شهر) |
+| `fig5_2_residual_analysis.png` | تحلیل خطا به تفکیک شهر و سن ساختمان |
+| `table5_1_model_accuracy.csv` | دقت مدل (R², MAE, RMSE) برای هر شهر |
+
+### فصل ۶: تفسیرپذیری و اتصال به فیزیک
+
+| فایل | توضیح |
+|------|-------|
+| `fig6_1_feature_importance.png` | اهمیت ویژگی‌ها برای ۴ مدل (انرژی، کربن، هزینه) |
+| `fig6_2_sensitivity_analysis.png` | تحلیل حساسیت (دیوار، سقف، سیستم گرمایش) |
+
+### فصل ۷: بهینه‌سازی و مهندسی معکوس
+
+| فایل | توضیح |
+|------|-------|
+| `fig7_1_case_studies.png` | ۴ مطالعه موردی (قبل و بعد رتروفیت) |
+| `fig7_2_pareto_curve.png` | منحنی هزینه-فایده پارتو |
+| `fig7_3_recommended_measures.png` | ۱۵ اقدام پیشنهادی برتر از recommendations.csv |
+| `table7_1_case_studies.csv` | جدول نتایج مطالعات موردی با هزینه‌ها |
+
+---
+
 ## API Endpoints
 
 ### POST /evaluate
-Evaluate building performance based on characteristics.
+ارزیابی عملکرد ساختمان بر اساس مشخصات.
 
-**Request:**
+**درخواست:**
 ```json
 {
   "building_profile": {
@@ -87,7 +162,7 @@ Evaluate building performance based on characteristics.
 }
 ```
 
-**Response:**
+**پاسخ:**
 ```json
 {
   "energy_intensity_kwh_m2": 297.4,
@@ -101,9 +176,9 @@ Evaluate building performance based on characteristics.
 ```
 
 ### POST /optimize
-Get optimal retrofit recommendations to achieve a target.
+دریافت توصیه‌های بهینه رتروفیت برای رسیدن به هدف.
 
-**Request:**
+**درخواست:**
 ```json
 {
   "building_profile": { ... },
@@ -114,14 +189,14 @@ Get optimal retrofit recommendations to achieve a target.
 }
 ```
 
-**Response:**
+**پاسخ:**
 ```json
 {
   "recommendations": [
     {
       "package_rank": 1,
-      "measures": [...],
-      "total_cost_range": "£7,450 - £13,800",
+      "measures": ["Loft insulation", "Cavity wall insulation", "Solar PV"],
+      "total_cost_range": "£5,000 - £8,000",
       "energy_reduction_pct": 39.1,
       "carbon_reduction_pct": 50.2,
       "payback_years": 18.5
@@ -131,108 +206,118 @@ Get optimal retrofit recommendations to achieve a target.
 ```
 
 ### POST /sensitivity
-Perform sensitivity analysis on a parameter.
+تحلیل حساسیت برای یک پارامتر.
 
-**Request:**
-```json
-{
-  "building_profile": { ... },
-  "feature": "WALLS_ENERGY_EFF_NUM",
-  "values": [1, 2, 3, 4, 5]
-}
-```
+---
 
-## Model Performance
+## عملکرد مدل | Model Performance
 
-| Model | R² | MAE | Description |
-|-------|-----|-----|-------------|
-| Energy | 0.42 | 37.7 kWh/m² | Primary energy intensity |
-| Carbon | 0.45 | 6.4 kg/m² | Carbon emissions intensity |
-| Heating Cost | 0.75 | £152 | Annual heating costs |
-| Hot Water Cost | 0.66 | £38 | Annual hot water costs |
-| Total Cost | 0.74 | £183 | Total annual energy costs |
+### دقت کلی | Overall Accuracy
 
-## Feature Importance (Energy Model)
+| مدل | R² | MAE | RMSE | توضیح |
+|-----|-----|-----|------|-------|
+| Energy | 0.76 | 34.1 kWh/m² | 56.8 | شدت مصرف انرژی اولیه |
+| Carbon | 0.56 | 5.9 kg/m² | 13.4 | شدت انتشار کربن |
+| Heating Cost | 0.73 | £147 | £295 | هزینه سالانه گرمایش |
+| Total Cost | 0.71 | £178 | £339 | کل هزینه سالانه انرژی |
 
-The model correctly identifies physics-relevant features:
+### دقت به تفکیک شهر (مدل انرژی) | Per-City Accuracy
 
-1. **FORM_FACTOR** (31.7%) - Building geometry affects heat loss surface area
-2. **SYSTEM_EFFICIENCY** (10.5%) - Heating system performance
-3. **TOTAL_FLOOR_AREA** (10.3%) - Larger buildings have higher absolute consumption
-4. **WALLS_ENERGY_EFF** (4.8%) - Wall insulation quality
-5. **ENVELOPE_QUALITY** (4.7%) - Composite envelope score
+| شهر | R² | MAE | تعداد نمونه |
+|-----|-----|-----|-------------|
+| Cambridge | 0.86 | 32.3 | 421 |
+| Boston | 0.86 | 36.3 | 628 |
+| Liverpool | 0.68 | 36.8 | 4,291 |
+| Sheffield | 0.81 | 31.2 | 4,073 |
 
-## Data Structure
+### اعتبارسنجی فیزیکی | Physical Validation
 
-```
-data/
-├── domestic-E07000008-Cambridge/
-│   ├── certificates.csv      # EPC certificates
-│   ├── recommendations.csv   # Improvement recommendations
-│   └── open-meteo-*.csv      # Weather data
-├── domestic-E07000136-Boston/
-├── domestic-E08000012-Liverpool/
-└── domestic-E08000019-Sheffield/
-```
+✅ **سازگاری با شهود مهندسی:**
+- ویژگی‌های پوسته (دیوار، سقف) در رتبه‌های بالای اهمیت
+- بهبود عایق‌کاری دیوار → کاهش ۲۳٪ مصرف انرژی
+- بدون نشت داده (تقسیم بر اساس Postcode)
 
-## Key Input Features
+---
 
-### Envelope Features (Ordinal 1-5: Very Poor to Very Good)
-- `WALLS_ENERGY_EFF` - Wall insulation efficiency
-- `ROOF_ENERGY_EFF` - Roof insulation efficiency
-- `FLOOR_ENERGY_EFF` - Floor insulation efficiency
-- `WINDOWS_ENERGY_EFF` - Window thermal performance
-
-### System Features
-- `MAINHEAT_ENERGY_EFF` - Main heating system efficiency
-- `HOT_WATER_ENERGY_EFF` - Hot water system efficiency
-- `LOW_ENERGY_LIGHTING` - Percentage of low energy lights (0-100)
-
-### Building Characteristics
-- `TOTAL_FLOOR_AREA` - Floor area in m²
-- `CONSTRUCTION_AGE_BAND` - Building age period
-- `PROPERTY_TYPE` - House, Flat, etc.
-- `BUILT_FORM` - Detached, Semi-Detached, Terrace, etc.
-
-## Physical Consistency
-
-The system validates that model predictions respect physical laws:
-
-- **Better insulation → Lower energy consumption**: Model correctly predicts that improving wall rating from "Very Poor" to "Very Good" reduces energy by ~23%
-- **Feature importance alignment**: Envelope and system features rank high, consistent with heat transfer physics
-- **No data leakage**: Train/test split by postcode sector ensures geographic independence
-
-## Project Structure
+## ساختار پروژه | Project Structure
 
 ```
-src/
-├── retrofit_dss/
-│   ├── data/
-│   │   ├── loader.py         # Multi-city data loading
-│   │   └── preprocessor.py   # Feature engineering
-│   ├── models/
-│   │   └── surrogate.py      # ML surrogate models
-│   ├── optimization/
-│   │   └── engine.py         # Retrofit optimization
-│   └── api/
-│       └── app.py            # Flask REST API
-├── train.py                  # Model training script
-└── example_usage.py          # Usage examples
+├── data/                          # داده‌های EPC شهرها
+│   ├── domestic-E07000008-Cambridge/
+│   ├── domestic-E07000136-Boston/
+│   ├── domestic-E08000012-Liverpool/
+│   └── domestic-E08000019-Sheffield/
+│
+├── src/
+│   ├── retrofit_dss/              # پکیج اصلی
+│   │   ├── data/                  # بارگذاری و پیش‌پردازش
+│   │   │   ├── loader.py
+│   │   │   └── preprocessor.py
+│   │   ├── models/                # مدل‌های جایگزین
+│   │   │   └── surrogate.py
+│   │   ├── optimization/          # موتور بهینه‌سازی
+│   │   │   └── engine.py
+│   │   ├── api/                   # Flask REST API
+│   │   │   └── app.py
+│   │   └── utils/                 # ثوابت و توابع کمکی
+│   │       ├── constants.py
+│   │       └── helpers.py
+│   │
+│   ├── analysis/                  # اسکریپت‌های تحلیل پایان‌نامه
+│   │   ├── thesis_analysis.py
+│   │   └── thesis_analysis_fast.py
+│   │
+│   ├── train.py                   # آموزش مدل‌ها
+│   └── example_usage.py           # مثال‌های کاربردی
+│
+├── outputs/
+│   └── thesis_figures/            # نمودارها و جداول پایان‌نامه
+│
+├── models/                        # مدل‌های آموزش‌دیده
+│   └── model_metrics.csv
+│
+├── requirements.txt
+└── README.md
 ```
 
-## Limitations & Risks
+---
 
-1. **Data Missingness**: Many EPC records lack detailed envelope specifications
-2. **Cost Accuracy**: Indicative costs may not reflect current market prices
-3. **Regional Coverage**: Model trained on 4 cities; may not generalize to all UK regions
-4. **Annual Data Only**: System uses annual aggregates, not hourly load profiles
+## موارد استفاده | Use Cases
 
-## References
+### UC-1: پیش‌بینی عملکرد (Performance Prediction)
+تخمین مصرف و هزینه بر اساس ویژگی‌های فعلی ساختمان.
+
+### UC-2: طراحی معکوس (Inverse Design)
+کاربر مقدار هدف (مثلاً ۶۰٪ کاهش کربن) را می‌دهد و سیستم ترکیب بهینه متغیرها را برمی‌گرداند.
+
+### UC-3: تحلیل حساسیت (Sensitivity Analysis)
+بررسی اثر تغییر یک پارامتر فیزیکی (مثل U-value دیوار) بر گرید نهایی EPC.
+
+---
+
+## محدودیت‌ها و ریسک‌ها | Limitations & Risks
+
+1. **داده‌های ناقص**: بسیاری از رکوردهای EPC مشخصات دقیق پوسته را ندارند
+2. **دقت هزینه**: هزینه‌های INDICATIVE_COST تقریبی هستند
+3. **پوشش منطقه‌ای**: مدل روی ۴ شهر آموزش دیده و ممکن است به کل انگلستان تعمیم نیابد
+4. **داده‌های سالانه**: فقط مصرف سالانه (نه ساعتی)
+
+---
+
+## منابع | References
 
 - UK EPC Open Data: https://epc.opendatacommunitites.org/
 - Open-Meteo Weather API: https://open-meteo.com/
 - SAP Methodology: Standard Assessment Procedure for UK dwellings
 
-## License
+---
 
-See LICENCE.txt in the data directories for EPC data usage terms.
+## مجوز | License
+
+مجوز استفاده از داده‌های EPC در فایل‌های LICENCE.txt در پوشه‌های data موجود است.
+
+---
+
+## تماس | Contact
+
+برای سوالات و پیشنهادات، لطفاً Issue بزنید.
