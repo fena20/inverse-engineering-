@@ -1,0 +1,23 @@
+# Retrofit Decision Support System - Dependencies
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+
+# API Framework
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Optimization
+scipy>=1.11.0
+
+# Visualization (for analysis)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Utilities
+joblib>=1.3.0
+pyyaml>=6.0.0
