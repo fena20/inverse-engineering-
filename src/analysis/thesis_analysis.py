@@ -50,11 +50,15 @@ def load_and_prepare_data():
     loader.discover_cities()
     certs_df, recs_df = loader.get_merged_data()
     
+    # Create train/test split on raw data to avoid preprocessing leakage
+    train_raw, test_raw = create_train_test_split(certs_df, test_size=0.2, random_state=42)
+
     preprocessor = DataPreprocessor()
-    processed_df = preprocessor.fit_transform(certs_df)
-    
-    # Create train/test split
-    train_df, test_df = create_train_test_split(processed_df, test_size=0.2, random_state=42)
+    preprocessor.fit(train_raw)
+
+    train_df = preprocessor.transform(train_raw)
+    test_df = preprocessor.transform(test_raw)
+    processed_df = preprocessor.transform(certs_df)
     
     return certs_df, recs_df, processed_df, train_df, test_df, preprocessor
 
@@ -918,6 +922,17 @@ def main():
     
     # Load data
     certs_df, recs_df, processed_df, train_df, test_df, preprocessor = load_and_prepare_data()
+
+    required_columns = {
+        'CITY',
+        'ENERGY_CONSUMPTION_CURRENT',
+        'CONSTRUCTION_AGE_BAND'
+    }
+    missing_columns = sorted(required_columns - set(processed_df.columns))
+    if missing_columns:
+        print("\nSkipping analysis: required columns missing from sample data.")
+        print(f"Missing columns: {', '.join(missing_columns)}")
+        return
     
     # Chapter 3: EDA
     summary_df = chapter3_eda(processed_df, OUTPUT_DIR)

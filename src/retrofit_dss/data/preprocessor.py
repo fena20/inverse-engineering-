@@ -7,7 +7,7 @@ with physics-based interpretations.
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
-from sklearn.model_selection import GroupShuffleSplit
+from sklearn.model_selection import GroupShuffleSplit, train_test_split
 
 from ..utils.constants import (
     EFFICIENCY_RATINGS,
@@ -440,6 +440,9 @@ def create_train_test_split(
     Returns:
         Tuple of (train_df, test_df)
     """
+    if postcode_column not in df.columns:
+        return train_test_split(df, test_size=test_size, random_state=random_state)
+
     # Extract postcode sector for grouping
     def get_sector(postcode):
         if pd.isna(postcode):

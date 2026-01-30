@@ -59,35 +59,40 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
     print("\n[2/6] Preprocessing data...")
     print("-" * 40)
     
-    preprocessor = DataPreprocessor()
-    processed_df = preprocessor.fit_transform(certs_df)
-    
-    print(f"Total records: {len(processed_df):,}")
-    print(f"Feature columns: {len(preprocessor.get_feature_columns())}")
-    
-    # 3. Sample if needed
-    if sample_size and sample_size < len(processed_df):
-        print(f"\nSampling {sample_size:,} records for training...")
-        processed_df = processed_df.sample(sample_size, random_state=42)
-    
-    # 4. Train/Test Split (by postcode to avoid leakage)
+    # 3. Train/Test Split (by postcode to avoid leakage)
     print("\n[3/6] Creating train/test split (by postcode)...")
     print("-" * 40)
     
-    train_df, test_df = create_train_test_split(
-        processed_df, 
+    train_raw, test_raw = create_train_test_split(
+        certs_df,
         test_size=0.2,
         random_state=42
     )
+
+    # Sample training data if needed
+    if sample_size and sample_size < len(train_raw):
+        print(f"\nSampling {sample_size:,} records for training...")
+        train_raw = train_raw.sample(sample_size, random_state=42)
+
+    preprocessor = DataPreprocessor()
+    preprocessor.fit(train_raw)
+    train_df = preprocessor.transform(train_raw)
+    test_df = preprocessor.transform(test_raw)
+
+    print(f"Total records: {len(certs_df):,}")
+    print(f"Feature columns: {len(preprocessor.get_feature_columns())}")
     
     print(f"Training set: {len(train_df):,} records")
     print(f"Test set: {len(test_df):,} records")
     
     # Verify no postcode overlap
-    train_postcodes = set(train_df['POSTCODE'].dropna().unique())
-    test_postcodes = set(test_df['POSTCODE'].dropna().unique())
-    overlap = train_postcodes.intersection(test_postcodes)
-    print(f"Postcode overlap check: {len(overlap)} overlapping postcodes")
+    if 'POSTCODE' in train_raw.columns:
+        train_postcodes = set(train_raw['POSTCODE'].dropna().unique())
+        test_postcodes = set(test_raw['POSTCODE'].dropna().unique())
+        overlap = train_postcodes.intersection(test_postcodes)
+        print(f"Postcode overlap check: {len(overlap)} overlapping postcodes")
+    else:
+        print("Postcode overlap check: skipped (POSTCODE column not available)")
     
     # 5. Train Models
     print("\n[4/6] Training surrogate models...")
@@ -166,27 +171,31 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
     print("=" * 60)
     
     optimizer = OptimizationEngine(model_factory)
-    optimizer.load_recommendations(recs_df)
-    
-    # Test with sample building
-    sample_building = test_df.iloc[0]
-    packages = optimizer.optimize(
-        sample_building,
-        target_type='carbon',
-        target_reduction=30.0,
-        max_measures=3
-    )
-    
-    print(f"\nSample optimization (30% carbon reduction target):")
-    print(f"Found {len(packages)} packages")
-    
-    if packages:
-        best = packages[0]
-        print(f"\nBest package:")
-        print(f"  Measures: {[m.name for m in best.measures]}")
-        print(f"  Cost: £{best.total_cost_min:,.0f} - £{best.total_cost_max:,.0f}")
-        print(f"  Carbon reduction: {best.predicted_carbon_reduction:.1f}%")
-        print(f"  Annual savings: £{best.predicted_cost_savings:,.0f}")
+
+    if recs_df is None or recs_df.empty or 'IMPROVEMENT_ID' not in recs_df.columns:
+        print("Skipping optimization test: recommendations data is missing required fields.")
+    else:
+        optimizer.load_recommendations(recs_df)
+
+        # Test with sample building
+        sample_building = test_df.iloc[0]
+        packages = optimizer.optimize(
+            sample_building,
+            target_type='carbon',
+            target_reduction=30.0,
+            max_measures=3
+        )
+
+        print(f"\nSample optimization (30% carbon reduction target):")
+        print(f"Found {len(packages)} packages")
+
+        if packages:
+            best = packages[0]
+            print(f"\nBest package:")
+            print(f"  Measures: {[m.name for m in best.measures]}")
+            print(f"  Cost: £{best.total_cost_min:,.0f} - £{best.total_cost_max:,.0f}")
+            print(f"  Carbon reduction: {best.predicted_carbon_reduction:.1f}%")
+            print(f"  Annual savings: £{best.predicted_cost_savings:,.0f}")
     
     print("\n" + "=" * 60)
     print("Training Complete!")

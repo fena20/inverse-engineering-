@@ -1,10 +1,10 @@
 # سیستم پشتیبانی تصمیم برای بازسازی ساختمان (Retrofit DSS)
 
-یک سیستم مدل‌سازی جایگزین (Surrogate) مبتنی بر فیزیک برای پیش‌بینی عملکرد انرژی ساختمان و بهینه‌سازی رتروفیت با استفاده از داده‌های EPC چهار شهر انگلستان.
+یک سیستم مدل‌سازی جایگزین (Surrogate) با ویژگی‌های «راهنما-یافته از فیزیک» برای پیش‌بینی عملکرد انرژی ساختمان و بهینه‌سازی رتروفیت با استفاده از داده‌های EPC چهار شهر انگلستان.
 
 ## Building Retrofit Decision Support System
 
-A physics-based surrogate modeling system for building energy performance prediction and retrofit optimization using UK EPC (Energy Performance Certificate) data from four major English cities.
+A physics-guided (feature-engineered) surrogate modeling system for building energy performance prediction and retrofit optimization using UK EPC (Energy Performance Certificate) data from four major English cities.
 
 ---
 
@@ -232,10 +232,10 @@ python -m retrofit_dss.api.app
 
 ### اعتبارسنجی فیزیکی | Physical Validation
 
-✅ **سازگاری با شهود مهندسی:**
+✅ **سازگاری با شهود مهندسی (Sanity Check):**
 - ویژگی‌های پوسته (دیوار، سقف) در رتبه‌های بالای اهمیت
-- بهبود عایق‌کاری دیوار → کاهش ۲۳٪ مصرف انرژی
-- بدون نشت داده (تقسیم بر اساس Postcode)
+- بهبود عایق‌کاری دیوار → کاهش ۲۳٪ مصرف انرژی (در تحلیل حساسیت)
+- جلوگیری از نشت داده با تقسیم بر اساس Postcode و فیت‌کردن پیش‌پردازش روی Train
 
 ---
 

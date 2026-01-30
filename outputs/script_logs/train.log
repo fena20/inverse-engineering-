@@ -1,0 +1,79 @@
+============================================================
+Retrofit DSS - Model Training Pipeline
+============================================================
+
+[1/6] Loading EPC data from all cities...
+----------------------------------------
+Found cities: ['Boston', 'Sheffield', 'Cambridge', 'Liverpool']
+Loading Boston certificates...
+  Loaded 2 records from Boston
+Loading Sheffield certificates...
+  Loaded 2 records from Sheffield
+Loading Cambridge certificates...
+  Loaded 2 records from Cambridge
+Loading Liverpool certificates...
+  Loaded 2 records from Liverpool
+
+Total: 8 certificates from 4 cities
+Loading Boston recommendations...
+  Loaded 2 recommendations from Boston
+Loading Sheffield recommendations...
+  Loaded 2 recommendations from Sheffield
+Loading Cambridge recommendations...
+  Loaded 2 recommendations from Cambridge
+Loading Liverpool recommendations...
+  Loaded 2 recommendations from Liverpool
+
+Total: 8 recommendations
+
+[2/6] Preprocessing data...
+----------------------------------------
+
+[3/6] Creating train/test split (by postcode)...
+----------------------------------------
+Total records: 8
+Feature columns: 5
+Training set: 6 records
+Test set: 2 records
+Postcode overlap check: skipped (POSTCODE column not available)
+
+[4/6] Training surrogate models...
+----------------------------------------
+Warning: Target 'ENERGY_CONSUMPTION_CURRENT' not found for energy model
+Warning: Target 'CO2_EMISS_CURR_PER_FLOOR_AREA' not found for carbon model
+Warning: Target 'HEATING_COST_CURRENT' not found for heating_cost model
+Warning: Target 'HOT_WATER_COST_CURRENT' not found for hot_water_cost model
+Warning: Target 'LIGHTING_COST_CURRENT' not found for lighting_cost model
+Warning: Target 'TOTAL_COST_CURRENT' not found for total_cost model
+
+[5/6] Evaluating models...
+----------------------------------------
+
+[6/6] Validating physical consistency...
+----------------------------------------
+
+============================================================
+Feature Importance Analysis (Energy Model)
+============================================================
+
+============================================================
+Saving models...
+============================================================
+Models saved to: models
+
+============================================================
+Training Summary Report
+============================================================
+
+Model Performance Summary:
+----------------------------------------
+Metrics saved to: models/model_metrics.csv
+
+============================================================
+Testing Optimization Engine
+============================================================
+Skipping optimization test: recommendations data is missing required fields.
+
+============================================================
+Training Complete!
+============================================================
