@@ -1,0 +1,57 @@
+======================================================================
+THESIS ANALYSIS - Fast Version
+======================================================================
+Loading data...
+Loading Sheffield certificates...
+  Loaded 2 records from Sheffield
+Loading Boston certificates...
+  Loaded 2 records from Boston
+Loading Cambridge certificates...
+  Loaded 2 records from Cambridge
+Loading Liverpool certificates...
+  Loaded 2 records from Liverpool
+
+Total: 8 certificates from 4 cities
+Loading Sheffield recommendations...
+  Loaded 2 recommendations from Sheffield
+Loading Boston recommendations...
+  Loaded 2 recommendations from Boston
+Loading Cambridge recommendations...
+  Loaded 2 recommendations from Cambridge
+Loading Liverpool recommendations...
+  Loaded 2 recommendations from Liverpool
+
+Total: 8 recommendations
+Preprocessing...
+
+Generating figures...
+Warning: ENERGY_CONSUMPTION_CURRENT missing; skipping Fig 3.1.
+Warning: Age/efficiency columns missing; skipping Fig 3.2.
+
+[Fig 3.3] Correlation Matrix...
+  Skipping Fig 3.3 (insufficient data for correlation).
+Warning: Required target columns missing; skipping model-based figures.
+
+======================================================================
+ANALYSIS COMPLETE
+======================================================================
+
+Output: /workspace/inverse-engineering-/outputs/thesis_figures
+
+Files generated:
+  - fig3_1_city_energy_distribution.pdf
+  - fig3_1_city_energy_distribution.png
+  - fig3_2_age_efficiency_heatmap.pdf
+  - fig3_2_age_efficiency_heatmap.png
+  - fig3_3_correlation_matrix.pdf
+  - fig3_3_correlation_matrix.png
+  - fig5_1_actual_vs_predicted.png
+  - fig5_2_residual_analysis.png
+  - fig6_1_feature_importance.png
+  - fig6_2_sensitivity_analysis.png
+  - fig7_1_case_studies.png
+  - fig7_2_pareto_curve.png
+  - fig7_3_recommended_measures.png
+  - table3_1_city_summary.csv
+  - table5_1_model_accuracy.csv
+  - table7_1_case_studies.csv

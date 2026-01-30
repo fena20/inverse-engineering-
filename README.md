@@ -1,10 +1,10 @@
 # سیستم پشتیبانی تصمیم برای بازسازی ساختمان (Retrofit DSS)
 
-یک سیستم مدل‌سازی جایگزین (Surrogate) مبتنی بر فیزیک برای پیش‌بینی عملکرد انرژی ساختمان و بهینه‌سازی رتروفیت با استفاده از داده‌های EPC چهار شهر انگلستان.
+یک سیستم مدل‌سازی جایگزین (Surrogate) با مهندسی ویژگی‌های فیزیک‌محور برای پیش‌بینی عملکرد انرژی ساختمان و بهینه‌سازی رتروفیت با استفاده از داده‌های EPC چهار شهر انگلستان.
 
 ## Building Retrofit Decision Support System
 
-A physics-based surrogate modeling system for building energy performance prediction and retrofit optimization using UK EPC (Energy Performance Certificate) data from four major English cities.
+A physics-guided surrogate modeling system for building energy performance prediction and retrofit optimization using UK EPC (Energy Performance Certificate) data from four major English cities.
 
 ---
 
@@ -29,11 +29,15 @@ A physics-based surrogate modeling system for building energy performance predic
 ### هدف
 ارائه یک موتور بهینه‌سازی که با دریافت هدف انرژی/کربن، ارزان‌ترین و اجرایی‌ترین مشخصات فنی (پوسته، تاسیسات، تجدیدپذیر) را پیشنهاد دهد.
 
+> نکته: در این پروژه «فیزیک» به‌معنی مهندسی ویژگی‌های فیزیک‌محور و قیود شهودی است، نه PINN/PIML با قیود حاکم بر معادلات.
+
 ### Problem Statement
 Difficulty in quickly estimating the effect of physical changes (envelope and systems) on energy consumption and carbon without heavy dynamic simulations.
 
 ### Objective
 Provide an optimization engine that, given energy/carbon targets, suggests the cheapest and most feasible technical specifications (envelope, HVAC, renewables).
+
+> Note: The "physics" here refers to physics-guided feature engineering and heuristic constraints, not PINN/PIML with governing-equation enforcement.
 
 ---
 

@@ -43,14 +43,19 @@ def load_data_fast():
     certs_df, recs_df = loader.get_merged_data()
     
     print("Preprocessing...")
+    train_raw, test_raw = create_train_test_split(certs_df, test_size=0.2, random_state=42)
+    
     preprocessor = DataPreprocessor()
-    processed_df = preprocessor.fit_transform(certs_df)
+    train_df = preprocessor.fit_transform(train_raw)
+    test_df = preprocessor.transform(test_raw)
     
     # Sample for speed
-    if len(processed_df) > SAMPLE_SIZE:
-        processed_df = processed_df.sample(SAMPLE_SIZE, random_state=42)
+    if len(train_df) > SAMPLE_SIZE:
+        train_df = train_df.sample(SAMPLE_SIZE, random_state=42)
+    if len(test_df) > SAMPLE_SIZE:
+        test_df = test_df.sample(SAMPLE_SIZE, random_state=42)
     
-    train_df, test_df = create_train_test_split(processed_df, test_size=0.2, random_state=42)
+    processed_df = pd.concat([train_df, test_df], ignore_index=True)
     
     return certs_df, recs_df, processed_df, train_df, test_df, preprocessor
 
@@ -159,6 +164,9 @@ def fig3_3_correlation_matrix(df, output_dir):
     
     available = [c for c in cols if c in df.columns]
     data = df[available].dropna()
+    if data.empty or len(available) < 2:
+        print("  Skipping Fig 3.3 (insufficient data for correlation).")
+        return
     
     names = {
         'TOTAL_FLOOR_AREA': 'Floor Area',
@@ -623,27 +631,48 @@ def main():
     # Load data
     certs_df, recs_df, processed_df, train_df, test_df, preprocessor = load_data_fast()
     
-    # Train models
-    print("\nTraining models...")
-    from retrofit_dss.models.surrogate import SurrogateModelFactory
-    
-    model_factory = SurrogateModelFactory('gradient_boosting')
-    model_factory.create_all_models()
-    feature_cols = preprocessor.get_feature_columns()
-    model_factory.fit_all(train_df, feature_cols)
-    
     # Generate figures
     print("\nGenerating figures...")
     
-    fig3_1_energy_distribution(processed_df, OUTPUT_DIR)
-    fig3_2_age_efficiency_heatmap(processed_df, OUTPUT_DIR)
+    if 'ENERGY_CONSUMPTION_CURRENT' in processed_df.columns:
+        fig3_1_energy_distribution(processed_df, OUTPUT_DIR)
+    else:
+        print("Warning: ENERGY_CONSUMPTION_CURRENT missing; skipping Fig 3.1.")
+    
+    required_age_cols = {'CONSTRUCTION_AGE_BAND', 'WALLS_ENERGY_EFF', 'ROOF_ENERGY_EFF'}
+    if required_age_cols.issubset(processed_df.columns):
+        fig3_2_age_efficiency_heatmap(processed_df, OUTPUT_DIR)
+    else:
+        print("Warning: Age/efficiency columns missing; skipping Fig 3.2.")
+    
     fig3_3_correlation_matrix(processed_df, OUTPUT_DIR)
-    fig5_1_actual_vs_predicted(model_factory, test_df, feature_cols, OUTPUT_DIR)
-    fig5_2_residual_analysis(model_factory, test_df, feature_cols, OUTPUT_DIR)
-    fig6_1_feature_importance(model_factory, OUTPUT_DIR)
-    fig6_2_sensitivity(model_factory, test_df, feature_cols, OUTPUT_DIR)
-    fig7_case_studies(model_factory, test_df, recs_df, feature_cols, OUTPUT_DIR)
-    generate_tables(processed_df, model_factory, test_df, feature_cols, OUTPUT_DIR)
+    
+    required_targets = {
+        'ENERGY_CONSUMPTION_CURRENT',
+        'CO2_EMISS_CURR_PER_FLOOR_AREA',
+        'HEATING_COST_CURRENT',
+        'TOTAL_COST_CURRENT'
+    }
+    has_targets = required_targets.issubset(train_df.columns) and required_targets.issubset(test_df.columns)
+    model_factory = None
+    feature_cols = preprocessor.get_feature_columns()
+    
+    if has_targets:
+        print("\nTraining models...")
+        from retrofit_dss.models.surrogate import SurrogateModelFactory
+        
+        model_factory = SurrogateModelFactory('gradient_boosting')
+        model_factory.create_all_models()
+        model_factory.fit_all(train_df, feature_cols)
+        
+        fig5_1_actual_vs_predicted(model_factory, test_df, feature_cols, OUTPUT_DIR)
+        fig5_2_residual_analysis(model_factory, test_df, feature_cols, OUTPUT_DIR)
+        fig6_1_feature_importance(model_factory, OUTPUT_DIR)
+        fig6_2_sensitivity(model_factory, test_df, feature_cols, OUTPUT_DIR)
+        fig7_case_studies(model_factory, test_df, recs_df, feature_cols, OUTPUT_DIR)
+        generate_tables(processed_df, model_factory, test_df, feature_cols, OUTPUT_DIR)
+    else:
+        print("Warning: Required target columns missing; skipping model-based figures.")
     
     print("\n" + "=" * 70)
     print("ANALYSIS COMPLETE")

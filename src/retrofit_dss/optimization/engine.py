@@ -141,7 +141,7 @@ class OptimizationEngine:
     Features:
     - Discrete optimization over measure combinations
     - Cost-benefit analysis
-    - Physics-informed measure effect estimation
+    - Physics-guided measure effect estimation
     - Multi-objective optimization (cost vs. reduction)
     """
     
@@ -156,7 +156,7 @@ class OptimizationEngine:
         self.recommendation_db = RecommendationDatabase()
         
         # Effect estimates for each measure category (% reduction in energy)
-        # These are physics-based estimates from typical improvements
+        # These are physics-guided estimates from typical improvements
         self.measure_effects = {
             'wall_insulation': {
                 'energy_reduction': 0.20,  # 20% reduction in envelope losses
@@ -250,6 +250,19 @@ class OptimizationEngine:
     
     def load_recommendations(self, df: pd.DataFrame):
         """Load recommendations data."""
+        required_cols = {
+            'IMPROVEMENT_ID',
+            'IMPROVEMENT_SUMMARY_TEXT',
+            'IMPROVEMENT_DESCR_TEXT',
+            'INDICATIVE_COST'
+        }
+        missing_cols = required_cols - set(df.columns)
+        if missing_cols:
+            print(
+                "Warning: Recommendation data missing required columns: "
+                f"{sorted(missing_cols)}. Skipping recommendation load."
+            )
+            return
         self.recommendation_db.load_from_dataframe(df)
     
     def estimate_improvement_effect(
@@ -260,7 +273,7 @@ class OptimizationEngine:
         """
         Estimate the effect of retrofit measures on a building.
         
-        Uses physics-based estimates combined with model predictions
+        Uses physics-guided estimates combined with model predictions
         when available.
         
         Args:
