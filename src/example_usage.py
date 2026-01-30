@@ -128,6 +128,10 @@ def main():
     
     X = processed[feature_cols]
     predictions = model_factory.predict(X)
+    if not predictions or 'energy' not in predictions:
+        print("\nWarning: No fitted models available for prediction. "
+              "Train models before running the example.")
+        return
     
     print("\nPredicted Performance:")
     print("-" * 40)

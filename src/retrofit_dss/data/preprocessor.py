@@ -2,12 +2,12 @@
 Data preprocessing module for EPC data.
 
 Handles cleaning, feature engineering, and encoding of categorical variables
-with physics-based interpretations.
+with physics-guided interpretations.
 """
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
-from sklearn.model_selection import GroupShuffleSplit
+from sklearn.model_selection import GroupShuffleSplit, train_test_split
 
 from ..utils.constants import (
     EFFICIENCY_RATINGS,
@@ -34,10 +34,10 @@ class DataPreprocessor:
     Preprocesses EPC data for machine learning.
     
     Features:
-    - Ordinal encoding for efficiency ratings (physics-based)
+    - Ordinal encoding for efficiency ratings (physics-guided)
     - Age band encoding (building regulations evolution)
     - Missing value imputation
-    - Feature engineering for physics-based analysis
+    - Feature engineering for physics-guided analysis
     """
     
     def __init__(self):
@@ -88,7 +88,7 @@ class DataPreprocessor:
         # 3. Handle numeric columns
         df = self._process_numerics(df)
         
-        # 4. Add physics-based features
+        # 4. Add physics-guided features
         df = self._add_physics_features(df)
         
         # 5. Handle missing values
@@ -155,7 +155,7 @@ class DataPreprocessor:
     
     def _encode_categoricals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Encode categorical variables with physics-meaningful ordinal values.
+        Encode categorical variables with physics-guided ordinal values.
         """
         # Construction age - newer buildings generally have better insulation
         if 'CONSTRUCTION_AGE_BAND' in df.columns:
@@ -248,7 +248,7 @@ class DataPreprocessor:
     
     def _add_physics_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Add physics-based engineered features.
+        Add physics-guided engineered features.
         
         These features are derived from building physics principles:
         - Envelope composite scores
@@ -340,7 +340,7 @@ class DataPreprocessor:
     
     def _handle_missing(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Handle missing values with physics-informed imputation.
+        Handle missing values with physics-aware imputation.
         """
         # For efficiency ratings, use median (most common case is average = 3)
         eff_cols = [col for col in df.columns if col.endswith('_EFF_NUM')]
@@ -440,6 +440,15 @@ def create_train_test_split(
     Returns:
         Tuple of (train_df, test_df)
     """
+    if postcode_column not in df.columns:
+        train_df, test_df = train_test_split(
+            df.copy(),
+            test_size=test_size,
+            random_state=random_state,
+            shuffle=True
+        )
+        return train_df, test_df
+
     # Extract postcode sector for grouping
     def get_sector(postcode):
         if pd.isna(postcode):

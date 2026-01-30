@@ -4,7 +4,7 @@ Training script for Retrofit DSS models.
 
 This script:
 1. Loads and merges EPC data from all cities
-2. Preprocesses features with physics-based encoding
+2. Preprocesses features with physics-guided encoding
 3. Trains surrogate models for energy, carbon, and costs
 4. Evaluates models and validates physical consistency
 5. Saves trained models for API use
@@ -55,39 +55,41 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
     
     certs_df, recs_df = loader.get_merged_data()
     
-    # 2. Preprocess Data
-    print("\n[2/6] Preprocessing data...")
+    # 2. Train/Test Split (by postcode to avoid leakage)
+    print("\n[2/6] Creating train/test split (by postcode)...")
     print("-" * 40)
     
-    preprocessor = DataPreprocessor()
-    processed_df = preprocessor.fit_transform(certs_df)
-    
-    print(f"Total records: {len(processed_df):,}")
-    print(f"Feature columns: {len(preprocessor.get_feature_columns())}")
-    
-    # 3. Sample if needed
-    if sample_size and sample_size < len(processed_df):
-        print(f"\nSampling {sample_size:,} records for training...")
-        processed_df = processed_df.sample(sample_size, random_state=42)
-    
-    # 4. Train/Test Split (by postcode to avoid leakage)
-    print("\n[3/6] Creating train/test split (by postcode)...")
-    print("-" * 40)
-    
-    train_df, test_df = create_train_test_split(
-        processed_df, 
+    train_raw, test_raw = create_train_test_split(
+        certs_df,
         test_size=0.2,
         random_state=42
     )
     
+    # 3. Preprocess Data (fit on train only to avoid leakage)
+    print("\n[3/6] Preprocessing data...")
+    print("-" * 40)
+    
+    preprocessor = DataPreprocessor()
+    train_df = preprocessor.fit_transform(train_raw)
+    test_df = preprocessor.transform(test_raw)
+    
+    print(f"Total records: {len(train_df) + len(test_df):,}")
+    print(f"Feature columns: {len(preprocessor.get_feature_columns())}")
+    
+    # 4. Sample if needed
+    if sample_size and sample_size < len(train_df):
+        print(f"\nSampling {sample_size:,} records for training...")
+        train_df = train_df.sample(sample_size, random_state=42)
+    
     print(f"Training set: {len(train_df):,} records")
     print(f"Test set: {len(test_df):,} records")
     
-    # Verify no postcode overlap
-    train_postcodes = set(train_df['POSTCODE'].dropna().unique())
-    test_postcodes = set(test_df['POSTCODE'].dropna().unique())
-    overlap = train_postcodes.intersection(test_postcodes)
-    print(f"Postcode overlap check: {len(overlap)} overlapping postcodes")
+    # Verify no postcode overlap when available
+    if 'POSTCODE' in train_df.columns and 'POSTCODE' in test_df.columns:
+        train_postcodes = set(train_df['POSTCODE'].dropna().unique())
+        test_postcodes = set(test_df['POSTCODE'].dropna().unique())
+        overlap = train_postcodes.intersection(test_postcodes)
+        print(f"Postcode overlap check: {len(overlap)} overlapping postcodes")
     
     # 5. Train Models
     print("\n[4/6] Training surrogate models...")

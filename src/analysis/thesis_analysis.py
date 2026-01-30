@@ -50,11 +50,13 @@ def load_and_prepare_data():
     loader.discover_cities()
     certs_df, recs_df = loader.get_merged_data()
     
-    preprocessor = DataPreprocessor()
-    processed_df = preprocessor.fit_transform(certs_df)
+    # Create train/test split before preprocessing to avoid leakage
+    train_raw, test_raw = create_train_test_split(certs_df, test_size=0.2, random_state=42)
     
-    # Create train/test split
-    train_df, test_df = create_train_test_split(processed_df, test_size=0.2, random_state=42)
+    preprocessor = DataPreprocessor()
+    train_df = preprocessor.fit_transform(train_raw)
+    test_df = preprocessor.transform(test_raw)
+    processed_df = pd.concat([train_df, test_df], ignore_index=True)
     
     return certs_df, recs_df, processed_df, train_df, test_df, preprocessor
 
@@ -920,16 +922,33 @@ def main():
     certs_df, recs_df, processed_df, train_df, test_df, preprocessor = load_and_prepare_data()
     
     # Chapter 3: EDA
-    summary_df = chapter3_eda(processed_df, OUTPUT_DIR)
+    summary_df = None
+    if 'ENERGY_CONSUMPTION_CURRENT' in processed_df.columns:
+        summary_df = chapter3_eda(processed_df, OUTPUT_DIR)
+    else:
+        print("Warning: ENERGY_CONSUMPTION_CURRENT missing; skipping Chapter 3 outputs.")
     
-    # Chapter 5: Model Results
-    model_factory, accuracy_df = chapter5_model_results(train_df, test_df, preprocessor, OUTPUT_DIR)
-    
-    # Chapter 6: Interpretability
-    chapter6_interpretability(model_factory, train_df, test_df, preprocessor, OUTPUT_DIR)
+    # Chapter 5/6: Model Results & Interpretability
+    required_targets = {
+        'ENERGY_CONSUMPTION_CURRENT',
+        'CO2_EMISS_CURR_PER_FLOOR_AREA',
+        'HEATING_COST_CURRENT',
+        'TOTAL_COST_CURRENT'
+    }
+    has_targets = required_targets.issubset(train_df.columns) and required_targets.issubset(test_df.columns)
+    model_factory = None
+    accuracy_df = None
+    if has_targets:
+        model_factory, accuracy_df = chapter5_model_results(train_df, test_df, preprocessor, OUTPUT_DIR)
+        chapter6_interpretability(model_factory, train_df, test_df, preprocessor, OUTPUT_DIR)
+    else:
+        print("Warning: Required target columns missing; skipping Chapter 5/6 outputs.")
     
     # Chapter 7: Optimization
-    case_df = chapter7_optimization(model_factory, test_df, recs_df, preprocessor, OUTPUT_DIR)
+    if model_factory is not None:
+        case_df = chapter7_optimization(model_factory, test_df, recs_df, preprocessor, OUTPUT_DIR)
+    else:
+        print("Warning: Model factory unavailable; skipping Chapter 7 outputs.")
     
     # Generate summary report
     print("\n" + "=" * 70)

@@ -65,7 +65,7 @@ def estimate_u_value_from_description(description: str) -> Optional[float]:
     """
     Estimate U-value from wall/roof description.
     
-    Physics-based estimation based on typical construction types.
+    Physics-guided estimation based on typical construction types.
     
     Args:
         description: Description string from EPC
@@ -272,7 +272,7 @@ def validate_physical_consistency(
     """
     Validate that improving wall efficiency reduces energy consumption.
     
-    This is a physics sanity check - better insulation should reduce heat loss.
+    This is a physics-guided sanity check - better insulation should reduce heat loss.
     
     Args:
         wall_eff: Original wall efficiency rating

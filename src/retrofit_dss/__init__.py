@@ -1,12 +1,12 @@
 """
 Retrofit Decision Support System (DSS)
 
-A physics-based surrogate modeling system for building energy performance 
+A physics-guided surrogate modeling system for building energy performance
 prediction and retrofit optimization using UK EPC data.
 
 Key Features:
 - Multi-city EPC data integration with climate effects
-- Physics-interpretable feature engineering
+- Physics-guided feature engineering
 - Surrogate models for energy intensity, carbon emissions, and costs
 - Discrete optimization engine for retrofit recommendations
 """

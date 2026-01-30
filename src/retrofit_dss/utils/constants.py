@@ -2,7 +2,7 @@
 Constants and configuration for the Retrofit DSS.
 """
 
-# Efficiency ratings ordinal encoding (physics-based: higher = better efficiency)
+# Efficiency ratings ordinal encoding (physics-guided: higher = better efficiency)
 EFFICIENCY_RATINGS = {
     'Very Poor': 1,
     'Poor': 2,

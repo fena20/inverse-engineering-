@@ -2,7 +2,7 @@
 Surrogate models for building energy performance prediction.
 
 These models replace time-consuming dynamic simulations with fast,
-physics-interpretable machine learning models trained on EPC data.
+physics-guided machine learning models trained on EPC data.
 """
 import numpy as np
 import pandas as pd
@@ -59,7 +59,7 @@ class FeatureImportance:
     
     def validate_physical_intuition(self) -> Dict[str, Any]:
         """
-        Validate that feature importance aligns with building physics.
+        Validate that feature importance aligns with building-physics intuition.
         
         Expected high importance for:
         - Wall efficiency (major heat loss path)
@@ -68,7 +68,7 @@ class FeatureImportance:
         - Building age (proxy for insulation standards)
         
         Returns:
-            Dictionary with validation results
+            Dictionary with a lightweight sanity check (not a hard constraint).
         """
         df = self.to_dataframe()
         top_15 = set(df.head(15)['feature'].tolist())
