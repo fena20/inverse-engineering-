@@ -1,0 +1,47 @@
+======================================================================
+Retrofit Decision Support System - Example Usage
+======================================================================
+
+[Setup] Loading data and models...
+Loading Boston certificates...
+  Loaded 2 records from Boston
+Loading Sheffield certificates...
+  Loaded 2 records from Sheffield
+Loading Cambridge certificates...
+  Loaded 2 records from Cambridge
+Loading Liverpool certificates...
+  Loaded 2 records from Liverpool
+
+Total: 8 certificates from 4 cities
+Loading Boston recommendations...
+  Loaded 2 recommendations from Boston
+Loading Sheffield recommendations...
+  Loaded 2 recommendations from Sheffield
+Loading Cambridge recommendations...
+  Loaded 2 recommendations from Cambridge
+Loading Liverpool recommendations...
+  Loaded 2 recommendations from Liverpool
+
+Total: 8 recommendations
+Warning: recommendations data missing required fields; skipping optimization demo.
+
+======================================================================
+UC-1: Performance Prediction
+======================================================================
+
+Building Profile:
+----------------------------------------
+  TOTAL_FLOOR_AREA: 90.0
+  WALLS_ENERGY_EFF: Poor
+  ROOF_ENERGY_EFF: Average
+  WINDOWS_ENERGY_EFF: Average
+  MAINHEAT_ENERGY_EFF: Good
+  CONSTRUCTION_AGE_BAND: England and Wales: 1930-1949
+  PROPERTY_TYPE: House
+  BUILT_FORM: Semi-Detached
+  LOW_ENERGY_LIGHTING: 20
+  CITY: Liverpool
+
+Predicted Performance:
+----------------------------------------
+No fitted models available for prediction. Skipping remaining examples.

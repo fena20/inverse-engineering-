@@ -1,0 +1,29 @@
+======================================================================
+THESIS ANALYSIS - Building Retrofit Decision Support System
+======================================================================
+======================================================================
+Loading Data from All Cities...
+======================================================================
+Loading Boston certificates...
+  Loaded 2 records from Boston
+Loading Sheffield certificates...
+  Loaded 2 records from Sheffield
+Loading Cambridge certificates...
+  Loaded 2 records from Cambridge
+Loading Liverpool certificates...
+  Loaded 2 records from Liverpool
+
+Total: 8 certificates from 4 cities
+Loading Boston recommendations...
+  Loaded 2 recommendations from Boston
+Loading Sheffield recommendations...
+  Loaded 2 recommendations from Sheffield
+Loading Cambridge recommendations...
+  Loaded 2 recommendations from Cambridge
+Loading Liverpool recommendations...
+  Loaded 2 recommendations from Liverpool
+
+Total: 8 recommendations
+
+Skipping analysis: required columns missing from sample data.
+Missing columns: CONSTRUCTION_AGE_BAND, ENERGY_CONSUMPTION_CURRENT

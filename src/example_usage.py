@@ -43,7 +43,13 @@ def main():
     
     # Initialize optimizer
     optimizer = OptimizationEngine(model_factory)
-    optimizer.load_recommendations(recs_df)
+    has_recommendations = (
+        recs_df is not None and not recs_df.empty and 'IMPROVEMENT_ID' in recs_df.columns
+    )
+    if has_recommendations:
+        optimizer.load_recommendations(recs_df)
+    else:
+        print("Warning: recommendations data missing required fields; skipping optimization demo.")
     
     # ===================================================================
     # UC-1: Performance Prediction
@@ -128,9 +134,13 @@ def main():
     
     X = processed[feature_cols]
     predictions = model_factory.predict(X)
-    
+
     print("\nPredicted Performance:")
     print("-" * 40)
+    if not predictions:
+        print("No fitted models available for prediction. Skipping remaining examples.")
+        return
+
     print(f"  Energy Intensity: {predictions['energy'][0]:.1f} kWh/m²/year")
     print(f"  Carbon Intensity: {predictions['carbon'][0]:.1f} kg CO₂/m²/year")
     print(f"  Heating Cost: £{predictions['heating_cost'][0]:.0f}/year")
@@ -165,34 +175,37 @@ def main():
     
     # Convert to Series for optimization
     profile_series = processed.iloc[0]
-    
-    # Get retrofit packages
-    packages = optimizer.optimize(
-        profile_series,
-        target_type='carbon',
-        target_reduction=50.0,
-        max_budget=25000,
-        max_measures=4
-    )
-    
-    print(f"\nFound {len(packages)} packages meeting target:")
-    print("-" * 40)
-    
-    for i, pkg in enumerate(packages[:5]):  # Show top 5
-        print(f"\nPackage {i+1}:")
-        print(f"  Measures: {', '.join(m.name for m in pkg.measures)}")
-        print(f"  Cost Range: £{pkg.total_cost_min:,.0f} - £{pkg.total_cost_max:,.0f}")
-        print(f"  Energy Reduction: {pkg.predicted_energy_reduction:.1f}%")
-        print(f"  Carbon Reduction: {pkg.predicted_carbon_reduction:.1f}%")
-        print(f"  Annual Savings: £{pkg.predicted_cost_savings:,.0f}")
-        if pkg.payback_years:
-            print(f"  Payback Period: {pkg.payback_years:.1f} years")
-    
-    # Cost-benefit summary
-    print("\n" + "-" * 40)
-    print("Cost-Benefit Summary Table:")
-    summary_df = optimizer.get_cost_benefit_summary(packages[:5])
-    print(summary_df.to_string(index=False))
+
+    if has_recommendations:
+        # Get retrofit packages
+        packages = optimizer.optimize(
+            profile_series,
+            target_type='carbon',
+            target_reduction=50.0,
+            max_budget=25000,
+            max_measures=4
+        )
+
+        print(f"\nFound {len(packages)} packages meeting target:")
+        print("-" * 40)
+
+        for i, pkg in enumerate(packages[:5]):  # Show top 5
+            print(f"\nPackage {i+1}:")
+            print(f"  Measures: {', '.join(m.name for m in pkg.measures)}")
+            print(f"  Cost Range: £{pkg.total_cost_min:,.0f} - £{pkg.total_cost_max:,.0f}")
+            print(f"  Energy Reduction: {pkg.predicted_energy_reduction:.1f}%")
+            print(f"  Carbon Reduction: {pkg.predicted_carbon_reduction:.1f}%")
+            print(f"  Annual Savings: £{pkg.predicted_cost_savings:,.0f}")
+            if pkg.payback_years:
+                print(f"  Payback Period: {pkg.payback_years:.1f} years")
+
+        # Cost-benefit summary
+        print("\n" + "-" * 40)
+        print("Cost-Benefit Summary Table:")
+        summary_df = optimizer.get_cost_benefit_summary(packages[:5])
+        print(summary_df.to_string(index=False))
+    else:
+        print("Skipping UC-2: recommendations data not available.")
     
     # ===================================================================
     # UC-3: Sensitivity Analysis

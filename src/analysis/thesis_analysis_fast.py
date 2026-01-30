@@ -42,15 +42,19 @@ def load_data_fast():
     loader.discover_cities()
     certs_df, recs_df = loader.get_merged_data()
     
+    # Sample for speed
+    if len(certs_df) > SAMPLE_SIZE:
+        certs_df = certs_df.sample(SAMPLE_SIZE, random_state=42)
+
+    train_raw, test_raw = create_train_test_split(certs_df, test_size=0.2, random_state=42)
+
     print("Preprocessing...")
     preprocessor = DataPreprocessor()
-    processed_df = preprocessor.fit_transform(certs_df)
-    
-    # Sample for speed
-    if len(processed_df) > SAMPLE_SIZE:
-        processed_df = processed_df.sample(SAMPLE_SIZE, random_state=42)
-    
-    train_df, test_df = create_train_test_split(processed_df, test_size=0.2, random_state=42)
+    preprocessor.fit(train_raw)
+
+    train_df = preprocessor.transform(train_raw)
+    test_df = preprocessor.transform(test_raw)
+    processed_df = preprocessor.transform(certs_df)
     
     return certs_df, recs_df, processed_df, train_df, test_df, preprocessor
 
@@ -622,6 +626,17 @@ def main():
     
     # Load data
     certs_df, recs_df, processed_df, train_df, test_df, preprocessor = load_data_fast()
+
+    required_columns = {
+        'CITY',
+        'ENERGY_CONSUMPTION_CURRENT',
+        'CONSTRUCTION_AGE_BAND'
+    }
+    missing_columns = sorted(required_columns - set(processed_df.columns))
+    if missing_columns:
+        print("\nSkipping analysis: required columns missing from sample data.")
+        print(f"Missing columns: {', '.join(missing_columns)}")
+        return
     
     # Train models
     print("\nTraining models...")
