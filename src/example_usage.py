@@ -42,7 +42,7 @@ def main():
     model_factory.load_all('models')
     
     # Initialize optimizer
-    optimizer = OptimizationEngine(model_factory)
+    optimizer = OptimizationEngine(model_factory, preprocessor)
     optimizer.load_recommendations(recs_df)
     
     # ===================================================================

@@ -55,37 +55,40 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
     
     certs_df, recs_df = loader.get_merged_data()
     
-    # 2. Preprocess Data
-    print("\n[2/6] Preprocessing data...")
+    # 2. Train/Test Split (by postcode to avoid leakage)
+    print("\n[2/6] Creating train/test split (by postcode)...")
     print("-" * 40)
     
-    preprocessor = DataPreprocessor()
-    processed_df = preprocessor.fit_transform(certs_df)
-    
-    print(f"Total records: {len(processed_df):,}")
-    print(f"Feature columns: {len(preprocessor.get_feature_columns())}")
-    
-    # 3. Sample if needed
-    if sample_size and sample_size < len(processed_df):
-        print(f"\nSampling {sample_size:,} records for training...")
-        processed_df = processed_df.sample(sample_size, random_state=42)
-    
-    # 4. Train/Test Split (by postcode to avoid leakage)
-    print("\n[3/6] Creating train/test split (by postcode)...")
-    print("-" * 40)
-    
-    train_df, test_df = create_train_test_split(
-        processed_df, 
+    raw_train_df, raw_test_df = create_train_test_split(
+        certs_df,
         test_size=0.2,
         random_state=42
     )
+    
+    # 3. Preprocess Data (fit on train only)
+    print("\n[3/6] Preprocessing data...")
+    print("-" * 40)
+    
+    preprocessor = DataPreprocessor()
+    preprocessor.fit(raw_train_df)
+    train_df = preprocessor.transform(raw_train_df)
+    test_df = preprocessor.transform(raw_test_df)
+    test_df = preprocessor.ensure_feature_columns(test_df)
+    
+    print(f"Total records: {len(train_df) + len(test_df):,}")
+    print(f"Feature columns: {len(preprocessor.get_feature_columns())}")
+    
+    # 4. Sample if needed
+    if sample_size and sample_size < len(train_df):
+        print(f"\nSampling {sample_size:,} records for training...")
+        train_df = train_df.sample(sample_size, random_state=42)
     
     print(f"Training set: {len(train_df):,} records")
     print(f"Test set: {len(test_df):,} records")
     
     # Verify no postcode overlap
-    train_postcodes = set(train_df['POSTCODE'].dropna().unique())
-    test_postcodes = set(test_df['POSTCODE'].dropna().unique())
+    train_postcodes = set(raw_train_df['POSTCODE'].dropna().unique())
+    test_postcodes = set(raw_test_df['POSTCODE'].dropna().unique())
     overlap = train_postcodes.intersection(test_postcodes)
     print(f"Postcode overlap check: {len(overlap)} overlapping postcodes")
     
@@ -165,7 +168,7 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
     print("Testing Optimization Engine")
     print("=" * 60)
     
-    optimizer = OptimizationEngine(model_factory)
+    optimizer = OptimizationEngine(model_factory, preprocessor)
     optimizer.load_recommendations(recs_df)
     
     # Test with sample building
@@ -187,6 +190,8 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
         print(f"  Cost: £{best.total_cost_min:,.0f} - £{best.total_cost_max:,.0f}")
         print(f"  Carbon reduction: {best.predicted_carbon_reduction:.1f}%")
         print(f"  Annual savings: £{best.predicted_cost_savings:,.0f}")
+        if best.predicted_carbon_reduction < 30.0:
+            print("  Target not achievable under current constraints; showing best available package.")
     
     print("\n" + "=" * 60)
     print("Training Complete!")

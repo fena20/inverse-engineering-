@@ -43,14 +43,18 @@ def load_data_fast():
     certs_df, recs_df = loader.get_merged_data()
     
     print("Preprocessing...")
+    raw_train_df, raw_test_df = create_train_test_split(certs_df, test_size=0.2, random_state=42)
+    
     preprocessor = DataPreprocessor()
-    processed_df = preprocessor.fit_transform(certs_df)
+    preprocessor.fit(raw_train_df)
+    train_df = preprocessor.transform(raw_train_df)
+    test_df = preprocessor.transform(raw_test_df)
+    test_df = preprocessor.ensure_feature_columns(test_df)
+    processed_df = preprocessor.transform(certs_df)
     
     # Sample for speed
     if len(processed_df) > SAMPLE_SIZE:
         processed_df = processed_df.sample(SAMPLE_SIZE, random_state=42)
-    
-    train_df, test_df = create_train_test_split(processed_df, test_size=0.2, random_state=42)
     
     return certs_df, recs_df, processed_df, train_df, test_df, preprocessor
 
@@ -350,24 +354,36 @@ def fig6_1_feature_importance(model_factory, output_dir):
     print(f"  Saved: fig6_1_feature_importance.png")
 
 
-def fig6_2_sensitivity(model_factory, test_df, feature_cols, output_dir):
+def fig6_2_sensitivity(model_factory, test_df, feature_cols, preprocessor, output_dir):
     """Sensitivity analysis."""
     print("\n[Fig 6.2] Sensitivity Analysis...")
     
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    ref = test_df.iloc[0].copy()
+    sample_size = min(50, len(test_df))
+    sample_df = test_df.sample(sample_size, random_state=42).copy()
     labels = ['Very Poor', 'Poor', 'Average', 'Good', 'Very Good']
     
     # Wall
     ax = axes[0, 0]
     results = []
     for val in [1, 2, 3, 4, 5]:
-        p = ref.copy()
-        p['WALLS_ENERGY_EFF_NUM'] = val
-        p['ENVELOPE_QUALITY'] = 0.35*val + 0.25*p.get('ROOF_ENERGY_EFF_NUM',3) + 0.15*0 + 0.25*p.get('WINDOWS_ENERGY_EFF_NUM',3)
-        X = pd.DataFrame([p])[feature_cols].fillna(0)
-        results.append(model_factory.models['energy'].predict(X)[0])
-    ax.plot([1,2,3,4,5], results, 'o-', lw=2, ms=8, c='#e74c3c')
+        preds = []
+        for _, row in sample_df.iterrows():
+            p = row.copy()
+            p['WALLS_ENERGY_EFF_NUM'] = val
+            updated = preprocessor.recompute_derived_features(pd.DataFrame([p]))
+            X = updated[feature_cols].fillna(0)
+            preds.append(model_factory.models['energy'].predict(X)[0])
+        results.append({
+            'median': float(np.median(preds)),
+            'p25': float(np.percentile(preds, 25)),
+            'p75': float(np.percentile(preds, 75))
+        })
+    wall_median = [r['median'] for r in results]
+    wall_p25 = [r['p25'] for r in results]
+    wall_p75 = [r['p75'] for r in results]
+    ax.plot([1,2,3,4,5], wall_median, 'o-', lw=2, ms=6, c='#e74c3c')
+    ax.fill_between([1,2,3,4,5], wall_p25, wall_p75, color='#e74c3c', alpha=0.2)
     ax.set_xticks([1,2,3,4,5])
     ax.set_xticklabels(labels, rotation=45)
     ax.set_ylabel('Energy (kWh/m²)')
@@ -378,12 +394,23 @@ def fig6_2_sensitivity(model_factory, test_df, feature_cols, output_dir):
     ax = axes[0, 1]
     results = []
     for val in [1, 2, 3, 4, 5]:
-        p = ref.copy()
-        p['ROOF_ENERGY_EFF_NUM'] = val
-        p['ENVELOPE_QUALITY'] = 0.35*p.get('WALLS_ENERGY_EFF_NUM',3) + 0.25*val + 0.15*0 + 0.25*p.get('WINDOWS_ENERGY_EFF_NUM',3)
-        X = pd.DataFrame([p])[feature_cols].fillna(0)
-        results.append(model_factory.models['energy'].predict(X)[0])
-    ax.plot([1,2,3,4,5], results, 'o-', lw=2, ms=8, c='#3498db')
+        preds = []
+        for _, row in sample_df.iterrows():
+            p = row.copy()
+            p['ROOF_ENERGY_EFF_NUM'] = val
+            updated = preprocessor.recompute_derived_features(pd.DataFrame([p]))
+            X = updated[feature_cols].fillna(0)
+            preds.append(model_factory.models['energy'].predict(X)[0])
+        results.append({
+            'median': float(np.median(preds)),
+            'p25': float(np.percentile(preds, 25)),
+            'p75': float(np.percentile(preds, 75))
+        })
+    roof_median = [r['median'] for r in results]
+    roof_p25 = [r['p25'] for r in results]
+    roof_p75 = [r['p75'] for r in results]
+    ax.plot([1,2,3,4,5], roof_median, 'o-', lw=2, ms=6, c='#3498db')
+    ax.fill_between([1,2,3,4,5], roof_p25, roof_p75, color='#3498db', alpha=0.2)
     ax.set_xticks([1,2,3,4,5])
     ax.set_xticklabels(labels, rotation=45)
     ax.set_ylabel('Energy (kWh/m²)')
@@ -394,12 +421,23 @@ def fig6_2_sensitivity(model_factory, test_df, feature_cols, output_dir):
     ax = axes[1, 0]
     results = []
     for val in [1, 2, 3, 4, 5]:
-        p = ref.copy()
-        p['MAINHEAT_ENERGY_EFF_NUM'] = val
-        p['SYSTEM_EFFICIENCY'] = (val + p.get('MAINHEATC_ENERGY_EFF_NUM',3) + p.get('HOT_WATER_ENERGY_EFF_NUM',3))/3
-        X = pd.DataFrame([p])[feature_cols].fillna(0)
-        results.append(model_factory.models['energy'].predict(X)[0])
-    ax.plot([1,2,3,4,5], results, 'o-', lw=2, ms=8, c='#9b59b6')
+        preds = []
+        for _, row in sample_df.iterrows():
+            p = row.copy()
+            p['MAINHEAT_ENERGY_EFF_NUM'] = val
+            updated = preprocessor.recompute_derived_features(pd.DataFrame([p]))
+            X = updated[feature_cols].fillna(0)
+            preds.append(model_factory.models['energy'].predict(X)[0])
+        results.append({
+            'median': float(np.median(preds)),
+            'p25': float(np.percentile(preds, 25)),
+            'p75': float(np.percentile(preds, 75))
+        })
+    heat_median = [r['median'] for r in results]
+    heat_p25 = [r['p25'] for r in results]
+    heat_p75 = [r['p75'] for r in results]
+    ax.plot([1,2,3,4,5], heat_median, 'o-', lw=2, ms=6, c='#9b59b6')
+    ax.fill_between([1,2,3,4,5], heat_p25, heat_p75, color='#9b59b6', alpha=0.2)
     ax.set_xticks([1,2,3,4,5])
     ax.set_xticklabels(labels, rotation=45)
     ax.set_ylabel('Energy (kWh/m²)')
@@ -408,16 +446,12 @@ def fig6_2_sensitivity(model_factory, test_df, feature_cols, output_dir):
     
     # Combined
     ax = axes[1, 1]
-    for comp, color, label in [('WALLS_ENERGY_EFF_NUM', '#e74c3c', 'Wall'),
-                                ('ROOF_ENERGY_EFF_NUM', '#3498db', 'Roof'),
-                                ('MAINHEAT_ENERGY_EFF_NUM', '#9b59b6', 'Heating')]:
-        results = []
-        for val in [1, 2, 3, 4, 5]:
-            p = ref.copy()
-            p[comp] = val
-            X = pd.DataFrame([p])[feature_cols].fillna(0)
-            results.append(model_factory.models['energy'].predict(X)[0])
-        ax.plot([1,2,3,4,5], results, 'o-', lw=2, ms=6, c=color, label=label)
+    for comp, color, label, median_vals in [
+        ('WALLS_ENERGY_EFF_NUM', '#e74c3c', 'Wall', wall_median),
+        ('ROOF_ENERGY_EFF_NUM', '#3498db', 'Roof', roof_median),
+        ('MAINHEAT_ENERGY_EFF_NUM', '#9b59b6', 'Heating', heat_median)
+    ]:
+        ax.plot([1,2,3,4,5], median_vals, 'o-', lw=2, ms=6, c=color, label=label)
     ax.set_xticks([1,2,3,4,5])
     ax.set_xticklabels(labels, rotation=45)
     ax.set_ylabel('Energy (kWh/m²)')
@@ -431,13 +465,13 @@ def fig6_2_sensitivity(model_factory, test_df, feature_cols, output_dir):
     print(f"  Saved: fig6_2_sensitivity_analysis.png")
 
 
-def fig7_case_studies(model_factory, test_df, recs_df, feature_cols, output_dir):
+def fig7_case_studies(model_factory, test_df, recs_df, feature_cols, preprocessor, output_dir):
     """Case studies and Pareto."""
     print("\n[Fig 7.1-7.4] Optimization Outputs...")
     
     from retrofit_dss.optimization.engine import OptimizationEngine
     
-    optimizer = OptimizationEngine(model_factory)
+    optimizer = OptimizationEngine(model_factory, preprocessor)
     optimizer.load_recommendations(recs_df)
     
     cities = ['Cambridge', 'Boston', 'Liverpool', 'Sheffield']
@@ -449,6 +483,19 @@ def fig7_case_studies(model_factory, test_df, recs_df, feature_cols, output_dir)
     for city, ax in zip(cities, axes.flatten()):
         city_df = test_df[test_df['CITY'] == city]
         if len(city_df) == 0:
+            ax.text(0.5, 0.5, 'No data available', transform=ax.transAxes,
+                    ha='center', va='center', fontsize=10, color='gray')
+            case_data.append({
+                'City': city,
+                'Current Energy': None,
+                'New Energy': None,
+                'Current Carbon': None,
+                'New Carbon': None,
+                'Current Cost': None,
+                'New Cost': None,
+                'Measures': None,
+                'Retrofit Cost': None
+            })
             continue
         
         building = city_df.iloc[0].copy()
@@ -462,11 +509,11 @@ def fig7_case_studies(model_factory, test_df, recs_df, feature_cols, output_dir)
         
         if packages:
             best = packages[0]
-            eff = optimizer.estimate_improvement_effect(building, best.measures)
+            counterfactual = optimizer.get_counterfactual_predictions(building, best.measures)
             
-            new_energy = curr_energy * (1 - eff['energy_reduction_pct']/100)
-            new_carbon = curr_carbon * (1 - eff['carbon_reduction_pct']/100)
-            new_cost = curr_cost * (1 - eff['energy_reduction_pct']/100)
+            new_energy = counterfactual.get('energy', curr_energy)
+            new_carbon = counterfactual.get('carbon', curr_carbon)
+            new_cost = counterfactual.get('total_cost', curr_cost)
             
             cats = ['Energy\n(kWh/m²)', 'Carbon\n(kg/m²)', 'Cost\n(£/yr)']
             before = [curr_energy, curr_carbon, curr_cost]
@@ -495,6 +542,20 @@ def fig7_case_studies(model_factory, test_df, recs_df, feature_cols, output_dir)
                 'New Cost': new_cost,
                 'Measures': ', '.join(m.name for m in best.measures),
                 'Retrofit Cost': best.total_cost_avg
+            })
+        else:
+            ax.text(0.5, 0.5, 'No feasible package', transform=ax.transAxes,
+                    ha='center', va='center', fontsize=10, color='gray')
+            case_data.append({
+                'City': city,
+                'Current Energy': curr_energy,
+                'New Energy': None,
+                'Current Carbon': curr_carbon,
+                'New Carbon': None,
+                'Current Cost': curr_cost,
+                'New Cost': None,
+                'Measures': None,
+                'Retrofit Cost': None
             })
     
     plt.tight_layout()
@@ -641,8 +702,8 @@ def main():
     fig5_1_actual_vs_predicted(model_factory, test_df, feature_cols, OUTPUT_DIR)
     fig5_2_residual_analysis(model_factory, test_df, feature_cols, OUTPUT_DIR)
     fig6_1_feature_importance(model_factory, OUTPUT_DIR)
-    fig6_2_sensitivity(model_factory, test_df, feature_cols, OUTPUT_DIR)
-    fig7_case_studies(model_factory, test_df, recs_df, feature_cols, OUTPUT_DIR)
+    fig6_2_sensitivity(model_factory, test_df, feature_cols, preprocessor, OUTPUT_DIR)
+    fig7_case_studies(model_factory, test_df, recs_df, feature_cols, preprocessor, OUTPUT_DIR)
     generate_tables(processed_df, model_factory, test_df, feature_cols, OUTPUT_DIR)
     
     print("\n" + "=" * 70)

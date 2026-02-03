@@ -50,11 +50,15 @@ def load_and_prepare_data():
     loader.discover_cities()
     certs_df, recs_df = loader.get_merged_data()
     
-    preprocessor = DataPreprocessor()
-    processed_df = preprocessor.fit_transform(certs_df)
+    # Create train/test split on raw data (avoid leakage)
+    raw_train_df, raw_test_df = create_train_test_split(certs_df, test_size=0.2, random_state=42)
     
-    # Create train/test split
-    train_df, test_df = create_train_test_split(processed_df, test_size=0.2, random_state=42)
+    preprocessor = DataPreprocessor()
+    preprocessor.fit(raw_train_df)
+    train_df = preprocessor.transform(raw_train_df)
+    test_df = preprocessor.transform(raw_test_df)
+    test_df = preprocessor.ensure_feature_columns(test_df)
+    processed_df = preprocessor.transform(certs_df)
     
     return certs_df, recs_df, processed_df, train_df, test_df, preprocessor
 
@@ -594,8 +598,9 @@ def chapter6_interpretability(model_factory, train_df, test_df, preprocessor, ou
     
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     
-    # Get a reference building
-    ref_building = test_df.iloc[0].copy()
+    # Sample a representative set of buildings
+    sample_size = min(100, len(test_df))
+    sample_df = test_df.sample(sample_size, random_state=42).copy()
     
     # Sensitivity to Wall Efficiency
     ax1 = axes[0, 0]
@@ -604,19 +609,26 @@ def chapter6_interpretability(model_factory, train_df, test_df, preprocessor, ou
     
     results = []
     for val in wall_values:
-        test_profile = ref_building.copy()
-        test_profile['WALLS_ENERGY_EFF_NUM'] = val
-        test_profile['ENVELOPE_QUALITY'] = (
-            0.35 * val + 
-            0.25 * test_profile.get('ROOF_ENERGY_EFF_NUM', 3) +
-            0.15 * test_profile.get('FLOOR_ENERGY_EFF_NUM', 0) +
-            0.25 * test_profile.get('WINDOWS_ENERGY_EFF_NUM', 3)
-        )
-        X = pd.DataFrame([test_profile])[feature_cols].fillna(0)
-        pred = model_factory.models['energy'].predict(X)[0]
-        results.append(pred)
+        preds = []
+        for _, row in sample_df.iterrows():
+            test_profile = row.copy()
+            test_profile['WALLS_ENERGY_EFF_NUM'] = val
+            updated = preprocessor.recompute_derived_features(pd.DataFrame([test_profile]))
+            X = updated[feature_cols].fillna(0)
+            preds.append(model_factory.models['energy'].predict(X)[0])
+        results.append({
+            'value': val,
+            'median': float(np.median(preds)),
+            'p25': float(np.percentile(preds, 25)),
+            'p75': float(np.percentile(preds, 75))
+        })
     
-    ax1.plot(wall_values, results, 'o-', linewidth=2, markersize=8, color='#e74c3c')
+    wall_median = [r['median'] for r in results]
+    wall_p25 = [r['p25'] for r in results]
+    wall_p75 = [r['p75'] for r in results]
+    
+    ax1.plot(wall_values, wall_median, 'o-', linewidth=2, markersize=6, color='#e74c3c')
+    ax1.fill_between(wall_values, wall_p25, wall_p75, color='#e74c3c', alpha=0.2)
     ax1.set_xticks(wall_values)
     ax1.set_xticklabels(wall_labels, rotation=45)
     ax1.set_xlabel('Wall Insulation Rating')
@@ -628,19 +640,26 @@ def chapter6_interpretability(model_factory, train_df, test_df, preprocessor, ou
     ax2 = axes[0, 1]
     results_roof = []
     for val in wall_values:
-        test_profile = ref_building.copy()
-        test_profile['ROOF_ENERGY_EFF_NUM'] = val
-        test_profile['ENVELOPE_QUALITY'] = (
-            0.35 * test_profile.get('WALLS_ENERGY_EFF_NUM', 3) +
-            0.25 * val +
-            0.15 * test_profile.get('FLOOR_ENERGY_EFF_NUM', 0) +
-            0.25 * test_profile.get('WINDOWS_ENERGY_EFF_NUM', 3)
-        )
-        X = pd.DataFrame([test_profile])[feature_cols].fillna(0)
-        pred = model_factory.models['energy'].predict(X)[0]
-        results_roof.append(pred)
+        preds = []
+        for _, row in sample_df.iterrows():
+            test_profile = row.copy()
+            test_profile['ROOF_ENERGY_EFF_NUM'] = val
+            updated = preprocessor.recompute_derived_features(pd.DataFrame([test_profile]))
+            X = updated[feature_cols].fillna(0)
+            preds.append(model_factory.models['energy'].predict(X)[0])
+        results_roof.append({
+            'value': val,
+            'median': float(np.median(preds)),
+            'p25': float(np.percentile(preds, 25)),
+            'p75': float(np.percentile(preds, 75))
+        })
     
-    ax2.plot(wall_values, results_roof, 'o-', linewidth=2, markersize=8, color='#3498db')
+    roof_median = [r['median'] for r in results_roof]
+    roof_p25 = [r['p25'] for r in results_roof]
+    roof_p75 = [r['p75'] for r in results_roof]
+    
+    ax2.plot(wall_values, roof_median, 'o-', linewidth=2, markersize=6, color='#3498db')
+    ax2.fill_between(wall_values, roof_p25, roof_p75, color='#3498db', alpha=0.2)
     ax2.set_xticks(wall_values)
     ax2.set_xticklabels(wall_labels, rotation=45)
     ax2.set_xlabel('Roof Insulation Rating')
@@ -652,16 +671,26 @@ def chapter6_interpretability(model_factory, train_df, test_df, preprocessor, ou
     ax3 = axes[1, 0]
     results_heat = []
     for val in wall_values:
-        test_profile = ref_building.copy()
-        test_profile['MAINHEAT_ENERGY_EFF_NUM'] = val
-        test_profile['SYSTEM_EFFICIENCY'] = (val + 
-            test_profile.get('MAINHEATC_ENERGY_EFF_NUM', 3) +
-            test_profile.get('HOT_WATER_ENERGY_EFF_NUM', 3)) / 3
-        X = pd.DataFrame([test_profile])[feature_cols].fillna(0)
-        pred = model_factory.models['energy'].predict(X)[0]
-        results_heat.append(pred)
+        preds = []
+        for _, row in sample_df.iterrows():
+            test_profile = row.copy()
+            test_profile['MAINHEAT_ENERGY_EFF_NUM'] = val
+            updated = preprocessor.recompute_derived_features(pd.DataFrame([test_profile]))
+            X = updated[feature_cols].fillna(0)
+            preds.append(model_factory.models['energy'].predict(X)[0])
+        results_heat.append({
+            'value': val,
+            'median': float(np.median(preds)),
+            'p25': float(np.percentile(preds, 25)),
+            'p75': float(np.percentile(preds, 75))
+        })
     
-    ax3.plot(wall_values, results_heat, 'o-', linewidth=2, markersize=8, color='#9b59b6')
+    heat_median = [r['median'] for r in results_heat]
+    heat_p25 = [r['p25'] for r in results_heat]
+    heat_p75 = [r['p75'] for r in results_heat]
+    
+    ax3.plot(wall_values, heat_median, 'o-', linewidth=2, markersize=6, color='#9b59b6')
+    ax3.fill_between(wall_values, heat_p25, heat_p75, color='#9b59b6', alpha=0.2)
     ax3.set_xticks(wall_values)
     ax3.set_xticklabels(wall_labels, rotation=45)
     ax3.set_xlabel('Heating System Rating')
@@ -671,9 +700,9 @@ def chapter6_interpretability(model_factory, train_df, test_df, preprocessor, ou
     
     # Combined Sensitivity
     ax4 = axes[1, 1]
-    ax4.plot(wall_values, results, 'o-', linewidth=2, label='Wall', color='#e74c3c')
-    ax4.plot(wall_values, results_roof, 's-', linewidth=2, label='Roof', color='#3498db')
-    ax4.plot(wall_values, results_heat, '^-', linewidth=2, label='Heating', color='#9b59b6')
+    ax4.plot(wall_values, wall_median, 'o-', linewidth=2, label='Wall', color='#e74c3c')
+    ax4.plot(wall_values, roof_median, 's-', linewidth=2, label='Roof', color='#3498db')
+    ax4.plot(wall_values, heat_median, '^-', linewidth=2, label='Heating', color='#9b59b6')
     ax4.set_xticks(wall_values)
     ax4.set_xticklabels(wall_labels, rotation=45)
     ax4.set_xlabel('Component Rating')
@@ -704,7 +733,7 @@ def chapter7_optimization(model_factory, test_df, recs_df, preprocessor, output_
     feature_cols = preprocessor.get_feature_columns()
     
     # Initialize optimizer
-    optimizer = OptimizationEngine(model_factory)
+    optimizer = OptimizationEngine(model_factory, preprocessor)
     optimizer.load_recommendations(recs_df)
     
     # 7.1 Case Studies - 4 Buildings (one from each city)
@@ -718,6 +747,23 @@ def chapter7_optimization(model_factory, test_df, recs_df, preprocessor, output_
     for idx, (city, ax) in enumerate(zip(cities, axes.flatten())):
         # Find a building with poor rating
         city_df = test_df[test_df['CITY'] == city]
+        if len(city_df) == 0:
+            ax.text(0.5, 0.5, 'No data available', transform=ax.transAxes,
+                    ha='center', va='center', fontsize=10, color='gray')
+            case_studies.append({
+                'City': city,
+                'Current Energy': None,
+                'Current Carbon': None,
+                'Current Cost': None,
+                'New Energy': None,
+                'New Carbon': None,
+                'New Cost': None,
+                'Energy Reduction %': None,
+                'Carbon Reduction %': None,
+                'Retrofit Measures': None,
+                'Retrofit Cost': None
+            })
+            continue
         poor_buildings = city_df[
             (city_df['WALLS_ENERGY_EFF_NUM'] <= 2) | 
             (city_df['ROOF_ENERGY_EFF_NUM'] <= 2)
@@ -744,17 +790,16 @@ def chapter7_optimization(model_factory, test_df, recs_df, preprocessor, output_
         
         if packages:
             best_pkg = packages[0]
+            counterfactual = optimizer.get_counterfactual_predictions(building, best_pkg.measures)
             
-            # Estimate post-retrofit performance
-            effects = optimizer.estimate_improvement_effect(building, best_pkg.measures)
-            
-            new_energy = current_energy * (1 - effects['energy_reduction_pct'] / 100)
-            new_carbon = current_carbon * (1 - effects['carbon_reduction_pct'] / 100)
+            new_energy = counterfactual.get('energy', current_energy)
+            new_carbon = counterfactual.get('carbon', current_carbon)
+            new_cost = counterfactual.get('total_cost', current_cost)
             
             # Create before/after bar chart
             categories = ['Energy\n(kWh/m²)', 'Carbon\n(kg/m²)', 'Cost\n(£/year)']
             before = [current_energy, current_carbon, current_cost]
-            after = [new_energy, new_carbon, current_cost * (1 - effects['energy_reduction_pct'] / 100)]
+            after = [new_energy, new_carbon, new_cost]
             
             x = np.arange(len(categories))
             width = 0.35
@@ -775,6 +820,9 @@ def chapter7_optimization(model_factory, test_df, recs_df, preprocessor, output_
                            xytext=(0, 5), textcoords='offset points',
                            ha='center', fontsize=9, color='green')
             
+            energy_reduction_pct = (current_energy - new_energy) / current_energy * 100 if current_energy else 0
+            carbon_reduction_pct = (current_carbon - new_carbon) / current_carbon * 100 if current_carbon else 0
+            
             # Store case study data
             case_studies.append({
                 'City': city,
@@ -783,10 +831,27 @@ def chapter7_optimization(model_factory, test_df, recs_df, preprocessor, output_
                 'Current Cost': current_cost,
                 'New Energy': new_energy,
                 'New Carbon': new_carbon,
-                'Energy Reduction %': effects['energy_reduction_pct'],
-                'Carbon Reduction %': effects['carbon_reduction_pct'],
+                'New Cost': new_cost,
+                'Energy Reduction %': energy_reduction_pct,
+                'Carbon Reduction %': carbon_reduction_pct,
                 'Retrofit Measures': ', '.join(m.name for m in best_pkg.measures),
                 'Retrofit Cost': best_pkg.total_cost_avg
+            })
+        else:
+            ax.text(0.5, 0.5, 'No feasible package', transform=ax.transAxes,
+                    ha='center', va='center', fontsize=10, color='gray')
+            case_studies.append({
+                'City': city,
+                'Current Energy': current_energy,
+                'Current Carbon': current_carbon,
+                'Current Cost': current_cost,
+                'New Energy': None,
+                'New Carbon': None,
+                'New Cost': None,
+                'Energy Reduction %': None,
+                'Carbon Reduction %': None,
+                'Retrofit Measures': None,
+                'Retrofit Cost': None
             })
     
     plt.tight_layout()

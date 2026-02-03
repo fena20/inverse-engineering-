@@ -1,0 +1,6 @@
+Running src/retrofit_dss/optimization/engine.py
+Traceback (most recent call last):
+  File "/workspace/inverse-engineering-/src/retrofit_dss/optimization/engine.py", line 7, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+Script failed with exit code 1
