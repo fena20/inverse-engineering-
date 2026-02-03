@@ -295,10 +295,14 @@ def fig5_2_residual_analysis(model_factory, test_df, feature_cols, output_dir):
     valid_copy['age_group'] = age_bins
     valid_copy['residual'] = residuals
     
+    age_groups = ['<1950', '1950-75', '1976-95', '1996+']
     age_res = [valid_copy[valid_copy['age_group'] == g]['residual'].values
-               for g in ['<1950', '1950-75', '1976-95', '1996+']]
-    ax.boxplot([r for r in age_res if len(r) > 0],
-              labels=['<1950', '1950-75', '1976-95', '1996+'])
+               for g in age_groups]
+    valid_age_res = [r for r in age_res if len(r) > 0]
+    valid_labels = [g for r, g in zip(age_res, age_groups) if len(r) > 0]
+
+    if valid_age_res:
+        ax.boxplot(valid_age_res, labels=valid_labels)
     ax.axhline(y=0, color='r', linestyle='--')
     ax.set_xlabel('Building Age')
     ax.set_ylabel('Residual')
