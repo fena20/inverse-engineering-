@@ -89,7 +89,7 @@ class DataPreprocessor:
         df = self._process_numerics(df)
         
         # 4. Add physics-based features
-        df = self._add_physics_features(df)
+        df = self.add_physics_features(df)
         
         # 5. Handle missing values
         df = self._handle_missing(df)
@@ -246,7 +246,7 @@ class DataPreprocessor:
         
         return df
     
-    def _add_physics_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    def add_physics_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Add physics-based engineered features.
         

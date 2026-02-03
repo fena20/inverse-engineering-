@@ -33,7 +33,7 @@ SAMPLE_SIZE = 50000
 
 
 def load_data_fast():
-    """Load data with sampling for speed."""
+    """Load data with sampling for speed, preventing leakage."""
     from retrofit_dss.data.loader import DataLoader
     from retrofit_dss.data.preprocessor import DataPreprocessor, create_train_test_split
     
@@ -42,15 +42,24 @@ def load_data_fast():
     loader.discover_cities()
     certs_df, recs_df = loader.get_merged_data()
     
+    # Sample raw data for speed
+    if len(certs_df) > SAMPLE_SIZE:
+        print(f"Sampling {SAMPLE_SIZE} records from {len(certs_df)}...")
+        certs_df = certs_df.sample(SAMPLE_SIZE, random_state=42)
+
+    print("Splitting data (preventing leakage)...")
+    train_raw, test_raw = create_train_test_split(certs_df, test_size=0.2, random_state=42)
+
     print("Preprocessing...")
     preprocessor = DataPreprocessor()
-    processed_df = preprocessor.fit_transform(certs_df)
+    # Fit only on training data
+    preprocessor.fit(train_raw)
     
-    # Sample for speed
-    if len(processed_df) > SAMPLE_SIZE:
-        processed_df = processed_df.sample(SAMPLE_SIZE, random_state=42)
+    train_df = preprocessor.transform(train_raw)
+    test_df = preprocessor.transform(test_raw)
     
-    train_df, test_df = create_train_test_split(processed_df, test_size=0.2, random_state=42)
+    # For EDA, we can use the combined dataset (but models trained on train_df)
+    processed_df = pd.concat([train_df, test_df])
     
     return certs_df, recs_df, processed_df, train_df, test_df, preprocessor
 
@@ -71,24 +80,25 @@ def fig3_1_energy_distribution(df, output_dir):
     ax = axes[0]
     box_data = [energy_data[energy_data['CITY'] == city]['ENERGY_CONSUMPTION_CURRENT'].dropna() 
                 for city in cities]
-    bp = ax.boxplot(box_data, labels=cities, patch_artist=True)
-    for patch, color in zip(bp['boxes'], colors):
-        patch.set_facecolor(color)
-        patch.set_alpha(0.7)
+    # Filter empty data
+    valid_box_data = [d for d in box_data if len(d) > 0]
+    valid_cities = [c for c, d in zip(cities, box_data) if len(d) > 0]
+
+    if valid_box_data:
+        bp = ax.boxplot(valid_box_data, labels=valid_cities, patch_artist=True)
+        for patch, color in zip(bp['boxes'], colors[:len(valid_box_data)]):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.7)
+
     ax.set_ylabel('Primary Energy Intensity (kWh/m²/year)')
     ax.set_title('Energy Distribution by City')
-    
-    # Add means
-    for i, data in enumerate(box_data):
-        mean_val = data.mean()
-        ax.scatter(i+1, mean_val, color='red', s=50, zorder=3, marker='D', label='Mean' if i==0 else '')
-    ax.legend()
     
     # Histogram
     ax2 = axes[1]
     for city, color in zip(cities, colors):
         city_data = energy_data[energy_data['CITY'] == city]['ENERGY_CONSUMPTION_CURRENT']
-        ax2.hist(city_data, bins=30, alpha=0.5, label=city, color=color)
+        if len(city_data) > 0:
+            ax2.hist(city_data, bins=30, alpha=0.5, label=city, color=color)
     ax2.set_xlabel('Primary Energy Intensity (kWh/m²/year)')
     ax2.set_ylabel('Frequency')
     ax2.set_title('Energy Distribution Histogram')
@@ -125,6 +135,9 @@ def fig3_2_age_efficiency_heatmap(df, output_dir):
     
     for city, ax in zip(cities, axes.flatten()):
         city_df = df[df['CITY'] == city].copy()
+        if len(city_df) == 0:
+            continue
+
         city_df['Age'] = city_df['CONSTRUCTION_AGE_BAND'].map(age_mapping)
         city_df['Wall_Eff'] = city_df['WALLS_ENERGY_EFF'].map(eff_mapping)
         city_df['Roof_Eff'] = city_df['ROOF_ENERGY_EFF'].map(eff_mapping)
@@ -266,8 +279,10 @@ def fig5_2_residual_analysis(model_factory, test_df, feature_cols, output_dir):
     # By City
     ax = axes[0, 1]
     cities = ['Cambridge', 'Boston', 'Liverpool', 'Sheffield']
-    city_res = [residuals[valid['CITY'] == c] for c in cities]
-    bp = ax.boxplot(city_res, labels=cities, patch_artist=True)
+    city_res = [residuals[valid['CITY'] == c] for c in cities if (valid['CITY'] == c).sum() > 0]
+    valid_cities = [c for c in cities if (valid['CITY'] == c).sum() > 0]
+    if city_res:
+        bp = ax.boxplot(city_res, labels=valid_cities, patch_artist=True)
     ax.axhline(y=0, color='r', linestyle='--')
     ax.set_ylabel('Residual')
     ax.set_title('Residuals by City')
@@ -351,77 +366,84 @@ def fig6_1_feature_importance(model_factory, output_dir):
 
 
 def fig6_2_sensitivity(model_factory, test_df, feature_cols, output_dir):
-    """Sensitivity analysis."""
-    print("\n[Fig 6.2] Sensitivity Analysis...")
+    """Sensitivity analysis (Sampled)."""
+    print("\n[Fig 6.2] Sensitivity Analysis (Mean of 50 samples)...")
+
+    from retrofit_dss.data.preprocessor import DataPreprocessor
+    pp = DataPreprocessor()
+
+    # Sample 50 buildings for robustness
+    n_samples = min(50, len(test_df))
+    sample_buildings = test_df.sample(n_samples, random_state=42)
     
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    ref = test_df.iloc[0].copy()
     labels = ['Very Poor', 'Poor', 'Average', 'Good', 'Very Good']
     
+    # Helper to calculate sensitivity for a feature
+    def calc_sensitivity(feature_name, buildings):
+        avg_results = []
+        std_results = []
+        for val in [1, 2, 3, 4, 5]:
+            # Create a dataframe of modified buildings
+            modified_df = buildings.copy()
+            modified_df[feature_name] = val
+
+            # Recalculate physics features (CONSISTENT with Engine)
+            modified_df = pp.add_physics_features(modified_df)
+
+            # Predict
+            X = modified_df[feature_cols].fillna(0)
+            preds = model_factory.models['energy'].predict(X)
+
+            avg_results.append(np.mean(preds))
+            std_results.append(np.std(preds))
+        return avg_results, std_results
+
     # Wall
     ax = axes[0, 0]
-    results = []
-    for val in [1, 2, 3, 4, 5]:
-        p = ref.copy()
-        p['WALLS_ENERGY_EFF_NUM'] = val
-        p['ENVELOPE_QUALITY'] = 0.35*val + 0.25*p.get('ROOF_ENERGY_EFF_NUM',3) + 0.15*0 + 0.25*p.get('WINDOWS_ENERGY_EFF_NUM',3)
-        X = pd.DataFrame([p])[feature_cols].fillna(0)
-        results.append(model_factory.models['energy'].predict(X)[0])
-    ax.plot([1,2,3,4,5], results, 'o-', lw=2, ms=8, c='#e74c3c')
+    means, stds = calc_sensitivity('WALLS_ENERGY_EFF_NUM', sample_buildings)
+    ax.errorbar([1,2,3,4,5], means, yerr=stds, fmt='o-', lw=2, ms=8, c='#e74c3c', capsize=5)
     ax.set_xticks([1,2,3,4,5])
     ax.set_xticklabels(labels, rotation=45)
     ax.set_ylabel('Energy (kWh/m²)')
-    ax.set_title('Wall Insulation Sensitivity')
+    ax.set_title('Wall Insulation Sensitivity (n=50)')
     ax.grid(True, alpha=0.3)
     
     # Roof
     ax = axes[0, 1]
-    results = []
-    for val in [1, 2, 3, 4, 5]:
-        p = ref.copy()
-        p['ROOF_ENERGY_EFF_NUM'] = val
-        p['ENVELOPE_QUALITY'] = 0.35*p.get('WALLS_ENERGY_EFF_NUM',3) + 0.25*val + 0.15*0 + 0.25*p.get('WINDOWS_ENERGY_EFF_NUM',3)
-        X = pd.DataFrame([p])[feature_cols].fillna(0)
-        results.append(model_factory.models['energy'].predict(X)[0])
-    ax.plot([1,2,3,4,5], results, 'o-', lw=2, ms=8, c='#3498db')
+    means, stds = calc_sensitivity('ROOF_ENERGY_EFF_NUM', sample_buildings)
+    ax.errorbar([1,2,3,4,5], means, yerr=stds, fmt='o-', lw=2, ms=8, c='#3498db', capsize=5)
     ax.set_xticks([1,2,3,4,5])
     ax.set_xticklabels(labels, rotation=45)
     ax.set_ylabel('Energy (kWh/m²)')
-    ax.set_title('Roof Insulation Sensitivity')
+    ax.set_title('Roof Insulation Sensitivity (n=50)')
     ax.grid(True, alpha=0.3)
     
     # Heating
     ax = axes[1, 0]
-    results = []
-    for val in [1, 2, 3, 4, 5]:
-        p = ref.copy()
-        p['MAINHEAT_ENERGY_EFF_NUM'] = val
-        p['SYSTEM_EFFICIENCY'] = (val + p.get('MAINHEATC_ENERGY_EFF_NUM',3) + p.get('HOT_WATER_ENERGY_EFF_NUM',3))/3
-        X = pd.DataFrame([p])[feature_cols].fillna(0)
-        results.append(model_factory.models['energy'].predict(X)[0])
-    ax.plot([1,2,3,4,5], results, 'o-', lw=2, ms=8, c='#9b59b6')
+    means, stds = calc_sensitivity('MAINHEAT_ENERGY_EFF_NUM', sample_buildings)
+    ax.errorbar([1,2,3,4,5], means, yerr=stds, fmt='o-', lw=2, ms=8, c='#9b59b6', capsize=5)
     ax.set_xticks([1,2,3,4,5])
     ax.set_xticklabels(labels, rotation=45)
     ax.set_ylabel('Energy (kWh/m²)')
-    ax.set_title('Heating System Sensitivity')
+    ax.set_title('Heating System Sensitivity (n=50)')
     ax.grid(True, alpha=0.3)
     
-    # Combined
+    # Combined (Just showing means for clarity)
     ax = axes[1, 1]
-    for comp, color, label in [('WALLS_ENERGY_EFF_NUM', '#e74c3c', 'Wall'),
-                                ('ROOF_ENERGY_EFF_NUM', '#3498db', 'Roof'),
-                                ('MAINHEAT_ENERGY_EFF_NUM', '#9b59b6', 'Heating')]:
-        results = []
-        for val in [1, 2, 3, 4, 5]:
-            p = ref.copy()
-            p[comp] = val
-            X = pd.DataFrame([p])[feature_cols].fillna(0)
-            results.append(model_factory.models['energy'].predict(X)[0])
-        ax.plot([1,2,3,4,5], results, 'o-', lw=2, ms=6, c=color, label=label)
+
+    m_wall, _ = calc_sensitivity('WALLS_ENERGY_EFF_NUM', sample_buildings)
+    m_roof, _ = calc_sensitivity('ROOF_ENERGY_EFF_NUM', sample_buildings)
+    m_heat, _ = calc_sensitivity('MAINHEAT_ENERGY_EFF_NUM', sample_buildings)
+
+    ax.plot([1,2,3,4,5], m_wall, 'o-', lw=2, ms=6, c='#e74c3c', label='Wall')
+    ax.plot([1,2,3,4,5], m_roof, 'o-', lw=2, ms=6, c='#3498db', label='Roof')
+    ax.plot([1,2,3,4,5], m_heat, 'o-', lw=2, ms=6, c='#9b59b6', label='Heating')
+
     ax.set_xticks([1,2,3,4,5])
     ax.set_xticklabels(labels, rotation=45)
     ax.set_ylabel('Energy (kWh/m²)')
-    ax.set_title('Combined Sensitivity')
+    ax.set_title('Combined Sensitivity (Means)')
     ax.legend()
     ax.grid(True, alpha=0.3)
     
@@ -449,6 +471,7 @@ def fig7_case_studies(model_factory, test_df, recs_df, feature_cols, output_dir)
     for city, ax in zip(cities, axes.flatten()):
         city_df = test_df[test_df['CITY'] == city]
         if len(city_df) == 0:
+            print(f"Warning: No data for {city}")
             continue
         
         building = city_df.iloc[0].copy()
@@ -458,6 +481,7 @@ def fig7_case_studies(model_factory, test_df, recs_df, feature_cols, output_dir)
         curr_carbon = model_factory.models['carbon'].predict(X)[0]
         curr_cost = model_factory.models['total_cost'].predict(X)[0]
         
+        # Optimize
         packages = optimizer.optimize(building, 'carbon', 40.0, max_measures=3)
         
         if packages:
@@ -494,7 +518,8 @@ def fig7_case_studies(model_factory, test_df, recs_df, feature_cols, output_dir)
                 'Current Cost': curr_cost,
                 'New Cost': new_cost,
                 'Measures': ', '.join(m.name for m in best.measures),
-                'Retrofit Cost': best.total_cost_avg
+                'Retrofit Cost': best.total_cost_avg,
+                'Target Met': 'Yes' if best.target_met else 'No'
             })
     
     plt.tight_layout()
@@ -519,6 +544,7 @@ def fig7_case_studies(model_factory, test_df, recs_df, feature_cols, output_dir)
         for target in [10, 20, 30, 40, 50]:
             pkgs = optimizer.optimize(building, 'carbon', target, max_measures=4)
             if pkgs:
+                # Use the BEST package that meets the target
                 costs.append(pkgs[0].total_cost_avg)
                 reds.append(pkgs[0].predicted_carbon_reduction)
         
@@ -562,6 +588,8 @@ def generate_tables(df, model_factory, test_df, feature_cols, output_dir):
     summary = []
     for city in cities:
         c = df[df['CITY'] == city]
+        if len(c) == 0:
+            continue
         summary.append({
             'City': city,
             'Records': len(c),

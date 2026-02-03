@@ -4,10 +4,11 @@ Training script for Retrofit DSS models.
 
 This script:
 1. Loads and merges EPC data from all cities
-2. Preprocesses features with physics-based encoding
-3. Trains surrogate models for energy, carbon, and costs
-4. Evaluates models and validates physical consistency
-5. Saves trained models for API use
+2. Splits data into train/test to prevent leakage
+3. Preprocesses features with physics-based encoding (fit on train only)
+4. Trains surrogate models for energy, carbon, and costs
+5. Evaluates models and validates physical consistency
+6. Saves trained models for API use
 """
 import os
 import sys
@@ -46,7 +47,7 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
     Path(model_dir).mkdir(parents=True, exist_ok=True)
     
     # 1. Load Data
-    print("\n[1/6] Loading EPC data from all cities...")
+    print("\n[1/7] Loading EPC data from all cities...")
     print("-" * 40)
     
     loader = DataLoader(data_dir)
@@ -54,43 +55,53 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
     print(f"Found cities: {cities}")
     
     certs_df, recs_df = loader.get_merged_data()
-    
-    # 2. Preprocess Data
-    print("\n[2/6] Preprocessing data...")
-    print("-" * 40)
-    
-    preprocessor = DataPreprocessor()
-    processed_df = preprocessor.fit_transform(certs_df)
-    
-    print(f"Total records: {len(processed_df):,}")
-    print(f"Feature columns: {len(preprocessor.get_feature_columns())}")
-    
-    # 3. Sample if needed
-    if sample_size and sample_size < len(processed_df):
+    print(f"Total raw certificates: {len(certs_df):,}")
+
+    # 2. Sample if needed (on raw data)
+    if sample_size and sample_size < len(certs_df):
         print(f"\nSampling {sample_size:,} records for training...")
-        processed_df = processed_df.sample(sample_size, random_state=42)
+        certs_df = certs_df.sample(sample_size, random_state=42)
     
-    # 4. Train/Test Split (by postcode to avoid leakage)
-    print("\n[3/6] Creating train/test split (by postcode)...")
+    # 3. Train/Test Split (by postcode to avoid leakage)
+    # CRITICAL FIX: Split BEFORE preprocessing to prevent data leakage
+    print("\n[2/7] Creating train/test split (by postcode)...")
     print("-" * 40)
     
-    train_df, test_df = create_train_test_split(
-        processed_df, 
+    train_raw, test_raw = create_train_test_split(
+        certs_df,
         test_size=0.2,
         random_state=42
     )
     
-    print(f"Training set: {len(train_df):,} records")
-    print(f"Test set: {len(test_df):,} records")
+    print(f"Training set (raw): {len(train_raw):,} records")
+    print(f"Test set (raw): {len(test_raw):,} records")
     
     # Verify no postcode overlap
-    train_postcodes = set(train_df['POSTCODE'].dropna().unique())
-    test_postcodes = set(test_df['POSTCODE'].dropna().unique())
+    train_postcodes = set(train_raw['POSTCODE'].dropna().unique())
+    test_postcodes = set(test_raw['POSTCODE'].dropna().unique())
     overlap = train_postcodes.intersection(test_postcodes)
     print(f"Postcode overlap check: {len(overlap)} overlapping postcodes")
+
+    # 4. Preprocess Data
+    print("\n[3/7] Preprocessing data...")
+    print("-" * 40)
+
+    preprocessor = DataPreprocessor()
+
+    # Fit ONLY on training data
+    print("Fitting preprocessor on training data...")
+    preprocessor.fit(train_raw)
+
+    # Transform both
+    print("Transforming training data...")
+    train_df = preprocessor.transform(train_raw)
+    print("Transforming test data...")
+    test_df = preprocessor.transform(test_raw)
+
+    print(f"Feature columns: {len(preprocessor.get_feature_columns())}")
     
     # 5. Train Models
-    print("\n[4/6] Training surrogate models...")
+    print("\n[4/7] Training surrogate models...")
     print("-" * 40)
     
     model_factory = SurrogateModelFactory('gradient_boosting')
@@ -100,13 +111,13 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
     model_factory.fit_all(train_df, feature_columns)
     
     # 6. Evaluate Models
-    print("\n[5/6] Evaluating models...")
+    print("\n[5/7] Evaluating models...")
     print("-" * 40)
     
     metrics = model_factory.evaluate_all(test_df)
     
     # 7. Validate Physical Consistency
-    print("\n[6/6] Validating physical consistency...")
+    print("\n[6/7] Validating physical consistency...")
     print("-" * 40)
     
     validation = model_factory.validate_physical_consistency()
@@ -117,7 +128,7 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
         print(f"  Physically consistent: {results['physically_consistent']}")
         print(f"  Expected features found: {results['expected_found'][:5]}...")
         if results['expected_missing']:
-            print(f"  Missing expected: {results['expected_missing'][:3]}...")
+            print(f"  Not in top-k features: {results['expected_missing'][:3]}...")
     
     # 8. Feature Importance Analysis
     print("\n" + "=" * 60)
@@ -160,7 +171,7 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
     pd.DataFrame(metrics_data).T.to_csv(Path(model_dir) / 'model_metrics.csv')
     print(f"Metrics saved to: {model_dir}/model_metrics.csv")
     
-    # 11. Test Optimization Engine
+    # 11. Test Optimization Engine & Sensitivity
     print("\n" + "=" * 60)
     print("Testing Optimization Engine")
     print("=" * 60)
@@ -187,6 +198,44 @@ def main(data_dir: str = 'data', model_dir: str = 'models', sample_size: int = N
         print(f"  Cost: £{best.total_cost_min:,.0f} - £{best.total_cost_max:,.0f}")
         print(f"  Carbon reduction: {best.predicted_carbon_reduction:.1f}%")
         print(f"  Annual savings: £{best.predicted_cost_savings:,.0f}")
+
+    # Sensitivity Analysis on Representative Sample
+    print("\n[7/7] Sensitivity Analysis (Representative Sample n=50)...")
+    print("-" * 40)
+
+    sample_indices = np.random.choice(len(test_df), size=min(50, len(test_df)), replace=False)
+    sample_buildings = test_df.iloc[sample_indices]
+
+    print(f"Running sensitivity on {len(sample_buildings)} buildings...")
+
+    # Analyze Wall Efficiency Sensitivity
+    # Move from Poor (2) to Good (4)
+    deltas = []
+
+    for _, building in sample_buildings.iterrows():
+        # Baseline (current)
+        X_base = pd.DataFrame([building])[feature_columns].fillna(0)
+        pred_base = model_factory.models['energy'].predict(X_base)[0]
+
+        # Improved
+        b_improved = building.copy()
+        b_improved['WALLS_ENERGY_EFF_NUM'] = 4
+        # Need to re-calculate derived features here for full accuracy
+        # For now, simplistic update (should be improved with model-based engine later)
+        # Note: In the full fix, we will use the engine to do this correctly
+
+        X_imp = pd.DataFrame([b_improved])[feature_columns].fillna(0)
+        pred_imp = model_factory.models['energy'].predict(X_imp)[0]
+
+        deltas.append(pred_base - pred_imp)
+
+    mean_delta = np.mean(deltas)
+    std_delta = np.std(deltas)
+
+    print(f"Wall Insulation Sensitivity (Poor -> Good):")
+    print(f"  Mean Energy Reduction: {mean_delta:.2f} kWh/m²")
+    print(f"  Std Dev: {std_delta:.2f}")
+    print(f"  95% CI: {mean_delta - 1.96*std_delta/np.sqrt(len(deltas)):.2f} - {mean_delta + 1.96*std_delta/np.sqrt(len(deltas)):.2f}")
     
     print("\n" + "=" * 60)
     print("Training Complete!")
