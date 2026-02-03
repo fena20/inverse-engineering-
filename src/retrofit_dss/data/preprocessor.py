@@ -94,8 +94,9 @@ class DataPreprocessor:
         # 5. Handle missing values
         df = self._handle_missing(df)
         
-        # Build feature columns list
-        self._build_feature_list(df)
+        # Build feature columns list (only when not already set)
+        if not self.feature_columns:
+            self._build_feature_list(df)
         
         return df
     
@@ -409,6 +410,28 @@ class DataPreprocessor:
             'BUILDING_VINTAGE'
         ]
         self.feature_columns.extend([col for col in physics_cols if col in df.columns])
+
+    def ensure_feature_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Ensure all feature columns exist in the DataFrame."""
+        df = df.copy()
+        for col in self.feature_columns:
+            if col not in df.columns:
+                df[col] = 0
+        return df
+
+    def recompute_derived_features(
+        self,
+        df: pd.DataFrame,
+        overrides: Optional[Dict[str, float]] = None
+    ) -> pd.DataFrame:
+        """Recompute physics-derived features, with optional overrides."""
+        df = df.copy()
+        df = self._add_physics_features(df)
+        df = self._handle_missing(df)
+        if overrides:
+            for col, value in overrides.items():
+                df[col] = value
+        return df
     
     def get_feature_columns(self) -> List[str]:
         """Get the list of feature columns."""

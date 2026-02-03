@@ -1,0 +1,6 @@
+Running src/retrofit_dss/data/preprocessor.py
+Traceback (most recent call last):
+  File "/workspace/inverse-engineering-/src/retrofit_dss/data/preprocessor.py", line 7, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'
+Script failed with exit code 1

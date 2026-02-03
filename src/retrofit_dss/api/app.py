@@ -77,7 +77,7 @@ def create_app(config: Optional[Dict] = None) -> Flask:
                 model_factory.fit_all(train_df, preprocessor.get_feature_columns())
             
             # Initialize optimizer
-            optimizer = OptimizationEngine(model_factory)
+            optimizer = OptimizationEngine(model_factory, preprocessor)
             optimizer.load_recommendations(recs_df)
             
             # Store components

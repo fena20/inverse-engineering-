@@ -1,0 +1,6 @@
+Running src/analysis/thesis_analysis.py
+Traceback (most recent call last):
+  File "/workspace/inverse-engineering-/src/analysis/thesis_analysis.py", line 21, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'
+Script failed with exit code 1

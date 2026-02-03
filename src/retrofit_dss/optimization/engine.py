@@ -145,14 +145,16 @@ class OptimizationEngine:
     - Multi-objective optimization (cost vs. reduction)
     """
     
-    def __init__(self, model_factory=None):
+    def __init__(self, model_factory=None, preprocessor=None):
         """
         Initialize the optimization engine.
         
         Args:
             model_factory: SurrogateModelFactory for predictions
+            preprocessor: DataPreprocessor for recomputing derived features
         """
         self.model_factory = model_factory
+        self.preprocessor = preprocessor
         self.recommendation_db = RecommendationDatabase()
         
         # Effect estimates for each measure category (% reduction in energy)
@@ -251,6 +253,60 @@ class OptimizationEngine:
     def load_recommendations(self, df: pd.DataFrame):
         """Load recommendations data."""
         self.recommendation_db.load_from_dataframe(df)
+
+    def _predict_profile(self, profile: pd.Series) -> Dict[str, float]:
+        """Predict energy/carbon/costs for a profile using the model factory."""
+        if self.model_factory is None:
+            raise ValueError("Model factory required for model-based predictions")
+        df = pd.DataFrame([profile])
+        if self.preprocessor is not None:
+            df = self.preprocessor.ensure_feature_columns(df)
+        X = df[self.model_factory.feature_columns].fillna(0)
+        predictions = self.model_factory.predict(X)
+        return {name: float(pred[0]) for name, pred in predictions.items()}
+
+    def _apply_measures_to_profile(
+        self,
+        profile: pd.Series,
+        measures: List[RetrofitMeasure]
+    ) -> pd.Series:
+        """Apply measure effects to a profile and recompute derived features."""
+        updated = profile.copy()
+        derived_overrides = {}
+        derived_override_features = {'INFILTRATION_PROXY'}
+
+        for measure in measures:
+            effects = self.measure_effects.get(measure.category, {})
+            for feature, value in effects.get('features_affected', {}).items():
+                if feature in derived_override_features:
+                    current = float(updated.get(feature, 0) or 0)
+                    derived_overrides[feature] = current + value
+                    continue
+
+                current = updated.get(feature)
+                if pd.isna(current):
+                    updated[feature] = value
+                    continue
+
+                if feature.endswith('_EFF_NUM') or feature in {
+                    'GLAZED_TYPE_NUM', 'LOW_ENERGY_LIGHTING', 'PHOTO_SUPPLY',
+                    'SOLAR_WATER_HEATING_NUM'
+                }:
+                    updated[feature] = max(current, value)
+                else:
+                    updated[feature] = value
+
+        if self.preprocessor is not None:
+            updated_df = self.preprocessor.recompute_derived_features(
+                pd.DataFrame([updated]),
+                overrides=derived_overrides
+            )
+            updated = updated_df.iloc[0]
+        elif derived_overrides:
+            for col, value in derived_overrides.items():
+                updated[col] = value
+
+        return updated
     
     def estimate_improvement_effect(
         self,
@@ -270,53 +326,68 @@ class OptimizationEngine:
         Returns:
             Dictionary with estimated reductions
         """
-        # Start with base profile - try different column names
-        current_energy = building_profile.get('ENERGY_CONSUMPTION_CURRENT', 
-                        building_profile.get('ENERGY_INTENSITY', 200))
+        if self.model_factory is not None:
+            current_predictions = self._predict_profile(building_profile)
+            updated_profile = self._apply_measures_to_profile(building_profile, measures)
+            updated_predictions = self._predict_profile(updated_profile)
+
+            current_energy = current_predictions.get('energy', 200)
+            current_carbon = current_predictions.get('carbon', 40)
+            current_cost = current_predictions.get('total_cost', 0)
+            updated_energy = updated_predictions.get('energy', current_energy)
+            updated_carbon = updated_predictions.get('carbon', current_carbon)
+            updated_cost = updated_predictions.get('total_cost', current_cost)
+
+            energy_reduction = max((current_energy - updated_energy) / current_energy, 0) if current_energy else 0
+            carbon_reduction = max((current_carbon - updated_carbon) / current_carbon, 0) if current_carbon else 0
+            cost_savings = max(current_cost - updated_cost, 0)
+
+            return {
+                'energy_reduction_pct': energy_reduction * 100,
+                'carbon_reduction_pct': carbon_reduction * 100,
+                'new_energy_intensity': updated_energy,
+                'new_carbon_intensity': updated_carbon,
+                'annual_cost_savings': cost_savings,
+                'current_total_cost': current_cost,
+                'new_total_cost': updated_cost
+            }
+
+        # Fallback: physics-based heuristics
+        current_energy = building_profile.get(
+            'ENERGY_CONSUMPTION_CURRENT',
+            building_profile.get('ENERGY_INTENSITY', 200)
+        )
         current_carbon = building_profile.get('CO2_EMISS_CURR_PER_FLOOR_AREA', 40)
-        
-        # Calculate current cost from individual components if not available
         heating = building_profile.get('HEATING_COST_CURRENT', 500)
         hot_water = building_profile.get('HOT_WATER_COST_CURRENT', 150)
         lighting = building_profile.get('LIGHTING_COST_CURRENT', 100)
         current_cost = building_profile.get('TOTAL_COST_CURRENT', heating + hot_water + lighting)
-        
-        # Ensure we have a reasonable cost value
+
         if current_cost <= 0:
-            # Estimate from floor area (typical £10-15/m² annual energy cost)
             floor_area = building_profile.get('TOTAL_FLOOR_AREA', 80)
-            current_cost = floor_area * 12  # £12/m² average
-        
-        # Calculate cumulative effect (not strictly additive due to diminishing returns)
+            current_cost = floor_area * 12
+
         total_energy_reduction = 0
         total_carbon_reduction = 0
-        
         applied_categories = set()
-        
+
         for measure in measures:
             if measure.category in applied_categories:
-                continue  # Don't double-count same category
-            
+                continue
             effects = self.measure_effects.get(measure.category, {})
             energy_red = effects.get('energy_reduction', 0.05)
             carbon_red = effects.get('carbon_reduction', 0.05)
-            
-            # Apply diminishing returns
+
             remaining_energy = 1 - total_energy_reduction
             remaining_carbon = 1 - total_carbon_reduction
-            
             total_energy_reduction += energy_red * remaining_energy
             total_carbon_reduction += carbon_red * remaining_carbon
-            
             applied_categories.add(measure.category)
-        
-        # Cap at realistic maximum
+
         total_energy_reduction = min(total_energy_reduction, 0.70)
         total_carbon_reduction = min(total_carbon_reduction, 0.80)
-        
-        # Estimate cost savings (proportional to energy reduction)
         cost_savings = current_cost * total_energy_reduction
-        
+
         return {
             'energy_reduction_pct': total_energy_reduction * 100,
             'carbon_reduction_pct': total_carbon_reduction * 100,
@@ -324,6 +395,15 @@ class OptimizationEngine:
             'new_carbon_intensity': current_carbon * (1 - total_carbon_reduction),
             'annual_cost_savings': cost_savings
         }
+
+    def get_counterfactual_predictions(
+        self,
+        building_profile: pd.Series,
+        measures: List[RetrofitMeasure]
+    ) -> Dict[str, float]:
+        """Get counterfactual predictions after applying measures."""
+        updated_profile = self._apply_measures_to_profile(building_profile, measures)
+        return self._predict_profile(updated_profile)
     
     def get_applicable_measures(
         self,
