@@ -1,0 +1,35 @@
+======================================================================
+Retrofit Decision Support System - Example Usage
+======================================================================
+
+[Setup] Loading data and models...
+Loading Boston certificates...
+  Loaded 2 records from Boston
+Loading Sheffield certificates...
+  Loaded 2 records from Sheffield
+Loading Cambridge certificates...
+  Loaded 2 records from Cambridge
+Loading Liverpool certificates...
+  Loaded 2 records from Liverpool
+
+Total: 8 certificates from 4 cities
+Loading Boston recommendations...
+  Loaded 2 recommendations from Boston
+Loading Sheffield recommendations...
+  Loaded 2 recommendations from Sheffield
+Loading Cambridge recommendations...
+  Loaded 2 recommendations from Cambridge
+Loading Liverpool recommendations...
+  Loaded 2 recommendations from Liverpool
+
+Total: 8 recommendations
+Traceback (most recent call last):
+  File "/workspace/inverse-engineering-/src/example_usage.py", line 267, in <module>
+    main()
+  File "/workspace/inverse-engineering-/src/example_usage.py", line 42, in main
+    model_factory.load_all('models')
+  File "/workspace/inverse-engineering-/src/retrofit_dss/models/surrogate.py", line 505, in load_all
+    self.feature_columns = joblib.load(directory / "feature_columns.joblib")
+  File "/root/.pyenv/versions/3.10.19/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 735, in load
+    with open(filename, "rb") as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'models/feature_columns.joblib'

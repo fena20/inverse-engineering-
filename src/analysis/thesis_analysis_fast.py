@@ -32,6 +32,30 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SAMPLE_SIZE = 50000
 
 
+def _get_env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _get_env_targets(name: str, default: str = '20,40,50') -> list:
+    raw = os.getenv(name, default)
+    vals = []
+    for token in str(raw).split(','):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            vals.append(float(token))
+        except ValueError:
+            continue
+    return vals or [20.0, 40.0, 50.0]
+
+
 def load_data_fast():
     """Load data with sampling for speed."""
     from retrofit_dss.data.loader import DataLoader
@@ -458,7 +482,7 @@ def fig7_case_studies(model_factory, test_df, recs_df, feature_cols, output_dir)
         curr_carbon = model_factory.models['carbon'].predict(X)[0]
         curr_cost = model_factory.models['total_cost'].predict(X)[0]
         
-        packages = optimizer.optimize(building, 'carbon', 40.0, max_measures=3)
+        packages = optimizer.optimize(building, 'carbon', 40.0, max_measures=_get_env_int('MAX_MEASURES', 3))
         
         if packages:
             best = packages[0]
@@ -515,9 +539,16 @@ def fig7_case_studies(model_factory, test_df, recs_df, feature_cols, output_dir)
         
         building = city_df.iloc[0]
         costs, reds = [], []
-        
-        for target in [10, 20, 30, 40, 50]:
-            pkgs = optimizer.optimize(building, 'carbon', target, max_measures=4)
+        all_pkgs = optimizer.generate_packages(
+            building,
+            target_type='carbon',
+            max_measures=_get_env_int('MAX_MEASURES', 3),
+            topk_measures=_get_env_int('TOPK_MEASURES', 15)
+        )
+
+        for target in _get_env_targets('PARETO_TARGETS', '20,40,50'):
+            pkgs = [p for p in all_pkgs if p.predicted_carbon_reduction >= target]
+            pkgs.sort(key=lambda p: p.total_cost_avg)
             if pkgs:
                 costs.append(pkgs[0].total_cost_avg)
                 reds.append(pkgs[0].predicted_carbon_reduction)

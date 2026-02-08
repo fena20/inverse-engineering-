@@ -37,6 +37,32 @@ OUTPUT_DIR = Path('outputs/thesis_figures')
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _get_env_int(name: str, default: int) -> int:
+    """Read integer environment variable with safe fallback."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _get_env_targets(name: str, default: str = '20,40,50') -> list:
+    """Read target list from env var like '20,40,50'."""
+    raw = os.getenv(name, default)
+    vals = []
+    for token in str(raw).split(','):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            vals.append(float(token))
+        except ValueError:
+            continue
+    return vals or [20.0, 40.0, 50.0]
+
+
 def load_and_prepare_data():
     """Load and preprocess all city data."""
     from retrofit_dss.data.loader import DataLoader
@@ -739,7 +765,7 @@ def chapter7_optimization(model_factory, test_df, recs_df, preprocessor, output_
             building,
             target_type='carbon',
             target_reduction=40.0,
-            max_measures=4
+            max_measures=_get_env_int('MAX_MEASURES', 3)
         )
         
         if packages:
@@ -805,7 +831,7 @@ def chapter7_optimization(model_factory, test_df, recs_df, preprocessor, output_
     
     fig, ax = plt.subplots(figsize=(12, 8))
     
-    carbon_targets = [10, 20, 30, 40, 50, 60]
+    carbon_targets = _get_env_targets('PARETO_TARGETS', '20,40,50')
     
     for city in cities:
         city_df = test_df[test_df['CITY'] == city]
@@ -816,15 +842,17 @@ def chapter7_optimization(model_factory, test_df, recs_df, preprocessor, output_
         
         costs = []
         reductions = []
-        
+
+        all_packages = optimizer.generate_packages(
+            sample_building,
+            target_type='carbon',
+            max_measures=_get_env_int('MAX_MEASURES', 3),
+            topk_measures=_get_env_int('TOPK_MEASURES', 15)
+        )
+
         for target in carbon_targets:
-            packages = optimizer.optimize(
-                sample_building,
-                target_type='carbon',
-                target_reduction=target,
-                max_measures=4
-            )
-            
+            packages = [p for p in all_packages if p.predicted_carbon_reduction >= target]
+            packages.sort(key=lambda p: p.total_cost_avg)
             if packages:
                 best = packages[0]
                 costs.append(best.total_cost_avg)
