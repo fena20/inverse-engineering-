@@ -6,6 +6,8 @@ retrofit measures to achieve energy/carbon targets.
 """
 import numpy as np
 import pandas as pd
+import os
+import time
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from itertools import combinations
@@ -154,6 +156,7 @@ class OptimizationEngine:
         """
         self.model_factory = model_factory
         self.recommendation_db = RecommendationDatabase()
+        self._baseline_cache: Dict[str, Dict[str, float]] = {}
         
         # Effect estimates for each measure category (% reduction in energy)
         # These are physics-based estimates from typical improvements
@@ -247,6 +250,139 @@ class OptimizationEngine:
                 }
             }
         }
+
+    def _get_env_int(self, key: str, default: int) -> int:
+        """Read integer environment variable with fallback."""
+        raw = os.getenv(key)
+        if raw is None:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+
+    def _building_cache_key(self, building_profile: pd.Series) -> str:
+        """Create stable cache key for baseline prediction of a building."""
+        lmk_key = building_profile.get('LMK_KEY')
+        if pd.notna(lmk_key):
+            return f"lmk::{lmk_key}"
+
+        safe_values = []
+        for k in sorted(building_profile.index):
+            v = building_profile.get(k)
+            if pd.isna(v):
+                v = 'nan'
+            safe_values.append(f"{k}={v}")
+        return 'hash::' + '|'.join(safe_values)
+
+    def _get_baseline_state(self, building_profile: pd.Series) -> Dict[str, float]:
+        """Get cached baseline/current state for a building."""
+        cache_key = self._building_cache_key(building_profile)
+        cached = self._baseline_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        current_energy = building_profile.get(
+            'ENERGY_CONSUMPTION_CURRENT',
+            building_profile.get('ENERGY_INTENSITY', 200)
+        )
+        current_carbon = building_profile.get('CO2_EMISS_CURR_PER_FLOOR_AREA', 40)
+
+        heating = building_profile.get('HEATING_COST_CURRENT', 500)
+        hot_water = building_profile.get('HOT_WATER_COST_CURRENT', 150)
+        lighting = building_profile.get('LIGHTING_COST_CURRENT', 100)
+        current_cost = building_profile.get('TOTAL_COST_CURRENT', heating + hot_water + lighting)
+
+        if current_cost <= 0:
+            floor_area = building_profile.get('TOTAL_FLOOR_AREA', 80)
+            current_cost = floor_area * 12
+
+        baseline = {
+            'current_energy': float(current_energy),
+            'current_carbon': float(current_carbon),
+            'current_cost': float(current_cost)
+        }
+        self._baseline_cache[cache_key] = baseline
+        return baseline
+
+    def _prescreen_measures(
+        self,
+        building_profile: pd.Series,
+        applicable_measures: List[RetrofitMeasure],
+        top_k: int,
+        target_type: str
+    ) -> List[RetrofitMeasure]:
+        """Reduce measure search-space to top-k by single-measure marginal gain."""
+        if top_k <= 0 or len(applicable_measures) <= top_k:
+            return applicable_measures
+
+        scored = []
+        for measure in applicable_measures:
+            effects = self.estimate_improvement_effect(building_profile, [measure])
+            target_reduction = effects.get(f'{target_type}_reduction_pct', 0.0)
+            value_score = target_reduction / max(measure.cost_avg, 1.0)
+            scored.append((value_score, target_reduction, measure))
+
+        scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        return [m for _, _, m in scored[:top_k]]
+
+    def generate_packages(
+        self,
+        building_profile: pd.Series,
+        target_type: str = 'carbon',
+        max_budget: Optional[float] = None,
+        max_measures: Optional[int] = None,
+        topk_measures: Optional[int] = None
+    ) -> List[RetrofitPackage]:
+        """Generate all candidate packages once, for query-many target filtering."""
+        t0 = time.perf_counter()
+        effective_max_measures = max_measures or self._get_env_int('MAX_MEASURES', 5)
+        effective_topk = topk_measures or self._get_env_int('TOPK_MEASURES', 15)
+
+        applicable_measures = list(self.recommendation_db.measures.values())
+        if max_budget:
+            applicable_measures = [m for m in applicable_measures if m.cost_min <= max_budget]
+
+        t1 = time.perf_counter()
+        reduced_measures = self._prescreen_measures(
+            building_profile=building_profile,
+            applicable_measures=applicable_measures,
+            top_k=effective_topk,
+            target_type=target_type
+        )
+        t2 = time.perf_counter()
+
+        packages = []
+        evaluated = 0
+        max_n = min(effective_max_measures + 1, len(reduced_measures) + 1)
+        for n in range(1, max_n):
+            for measure_combo in combinations(reduced_measures, n):
+                total_cost = sum(m.cost_avg for m in measure_combo)
+                if max_budget and total_cost > max_budget:
+                    continue
+
+                effects = self.estimate_improvement_effect(building_profile, list(measure_combo))
+                cost_savings = effects.get('annual_cost_savings', 0)
+
+                package = RetrofitPackage(
+                    measures=list(measure_combo),
+                    predicted_energy_reduction=effects.get('energy_reduction_pct', 0),
+                    predicted_carbon_reduction=effects.get('carbon_reduction_pct', 0),
+                    predicted_cost_savings=cost_savings
+                )
+                if cost_savings > 0:
+                    package.payback_years = package.total_cost_avg / cost_savings
+                packages.append(package)
+                evaluated += 1
+
+        t3 = time.perf_counter()
+        print(
+            "[OptimizationEngine.generate_packages] "
+            f"initial_measures={len(applicable_measures)} prescreened={len(reduced_measures)} "
+            f"combinations_evaluated={evaluated} load_s={(t1-t0):.3f} "
+            f"prescreen_s={(t2-t1):.3f} search_s={(t3-t2):.3f} total_s={(t3-t0):.3f}"
+        )
+        return packages
     
     def load_recommendations(self, df: pd.DataFrame):
         """Load recommendations data."""
@@ -270,22 +406,10 @@ class OptimizationEngine:
         Returns:
             Dictionary with estimated reductions
         """
-        # Start with base profile - try different column names
-        current_energy = building_profile.get('ENERGY_CONSUMPTION_CURRENT', 
-                        building_profile.get('ENERGY_INTENSITY', 200))
-        current_carbon = building_profile.get('CO2_EMISS_CURR_PER_FLOOR_AREA', 40)
-        
-        # Calculate current cost from individual components if not available
-        heating = building_profile.get('HEATING_COST_CURRENT', 500)
-        hot_water = building_profile.get('HOT_WATER_COST_CURRENT', 150)
-        lighting = building_profile.get('LIGHTING_COST_CURRENT', 100)
-        current_cost = building_profile.get('TOTAL_COST_CURRENT', heating + hot_water + lighting)
-        
-        # Ensure we have a reasonable cost value
-        if current_cost <= 0:
-            # Estimate from floor area (typical £10-15/m² annual energy cost)
-            floor_area = building_profile.get('TOTAL_FLOOR_AREA', 80)
-            current_cost = floor_area * 12  # £12/m² average
+        baseline = self._get_baseline_state(building_profile)
+        current_energy = baseline['current_energy']
+        current_carbon = baseline['current_carbon']
+        current_cost = baseline['current_cost']
         
         # Calculate cumulative effect (not strictly additive due to diminishing returns)
         total_energy_reduction = 0
@@ -421,7 +545,7 @@ class OptimizationEngine:
         target_type: str = 'carbon',
         target_reduction: float = 50.0,
         max_budget: Optional[float] = None,
-        max_measures: int = 5
+        max_measures: Optional[int] = None
     ) -> List[RetrofitPackage]:
         """
         Find optimal retrofit packages to achieve target.
@@ -439,48 +563,15 @@ class OptimizationEngine:
         Returns:
             List of recommended packages, sorted by cost-effectiveness
         """
-        # Get applicable measures
-        applicable_measures = list(self.recommendation_db.measures.values())
-        
-        # Filter by budget if specified
-        if max_budget:
-            applicable_measures = [
-                m for m in applicable_measures 
-                if m.cost_min <= max_budget
-            ]
-        
-        packages = []
-        
-        # Try all combinations up to max_measures
-        for n in range(1, min(max_measures + 1, len(applicable_measures) + 1)):
-            for measure_combo in combinations(applicable_measures, n):
-                # Skip if over budget
-                total_cost = sum(m.cost_avg for m in measure_combo)
-                if max_budget and total_cost > max_budget:
-                    continue
-                
-                # Estimate effect
-                effects = self.estimate_improvement_effect(
-                    building_profile,
-                    list(measure_combo)
-                )
-                
-                reduction = effects.get(f'{target_type}_reduction_pct', 0)
-                cost_savings = effects.get('annual_cost_savings', 0)
-                
-                # Create package
-                package = RetrofitPackage(
-                    measures=list(measure_combo),
-                    predicted_energy_reduction=effects.get('energy_reduction_pct', 0),
-                    predicted_carbon_reduction=effects.get('carbon_reduction_pct', 0),
-                    predicted_cost_savings=cost_savings
-                )
-                
-                # Calculate payback
-                if cost_savings > 0:
-                    package.payback_years = package.total_cost_avg / cost_savings
-                
-                packages.append(package)
+        effective_max_measures = max_measures or self._get_env_int('MAX_MEASURES', 5)
+
+        packages = self.generate_packages(
+            building_profile=building_profile,
+            target_type=target_type,
+            max_budget=max_budget,
+            max_measures=effective_max_measures,
+            topk_measures=self._get_env_int('TOPK_MEASURES', 15)
+        )
         
         # Filter packages that meet target
         valid_packages = [
