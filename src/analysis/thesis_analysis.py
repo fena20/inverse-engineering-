@@ -36,6 +36,10 @@ plt.rcParams['axes.labelsize'] = 11
 OUTPUT_DIR = Path('outputs/thesis_figures')
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+SPLIT_MODE = os.getenv('SPLIT_MODE', 'postcode').strip().lower()
+TEST_CITY = os.getenv('TEST_CITY', 'Cambridge').strip()
+LEAVE_ONE_CITY_OUT = os.getenv('LEAVE_ONE_CITY_OUT', '0').strip().lower() in {'1', 'true', 'yes'}
+
 
 def _get_env_int(name: str, default: int) -> int:
     """Read integer environment variable with safe fallback."""
@@ -63,10 +67,14 @@ def _get_env_targets(name: str, default: str = '20,40,50') -> list:
     return vals or [20.0, 40.0, 50.0]
 
 
-def load_and_prepare_data():
+def load_and_prepare_data(split_mode: str = 'postcode', test_city: str = 'Cambridge'):
     """Load and preprocess all city data."""
     from retrofit_dss.data.loader import DataLoader
-    from retrofit_dss.data.preprocessor import DataPreprocessor, create_train_test_split
+    from retrofit_dss.data.preprocessor import (
+        DataPreprocessor,
+        create_train_test_split,
+        create_city_train_test_split,
+    )
     
     print("=" * 70)
     print("Loading Data from All Cities...")
@@ -79,10 +87,88 @@ def load_and_prepare_data():
     preprocessor = DataPreprocessor()
     processed_df = preprocessor.fit_transform(certs_df)
     
-    # Create train/test split
-    train_df, test_df = create_train_test_split(processed_df, test_size=0.2, random_state=42)
+    if split_mode == 'city':
+        print(f"Using city holdout split. Test city: {test_city}")
+        train_df, test_df = create_city_train_test_split(
+            processed_df,
+            test_city=test_city,
+            city_column='CITY',
+            drop_city_from_features=False
+        )
+        preprocessor.feature_columns = [
+            c for c in preprocessor.get_feature_columns() if c not in {'CITY', 'CITY_NUM'}
+        ]
+    else:
+        print("Using postcode-based grouped split.")
+        train_df, test_df = create_train_test_split(processed_df, test_size=0.2, random_state=42)
     
     return certs_df, recs_df, processed_df, train_df, test_df, preprocessor
+
+
+def run_leave_one_city_out_analysis(processed_df, preprocessor, output_dir):
+    """Run leave-one-city-out evaluation and save metrics table."""
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    from retrofit_dss.data.preprocessor import create_city_train_test_split
+    from retrofit_dss.models.surrogate import SurrogateModelFactory
+
+    print("\n" + "=" * 70)
+    print("LEAVE-ONE-CITY-OUT EVALUATION")
+    print("=" * 70)
+
+    targets = {
+        'energy': 'ENERGY_CONSUMPTION_CURRENT',
+        'carbon': 'CO2_EMISS_CURR_PER_FLOOR_AREA',
+        'heating_cost': 'HEATING_COST_CURRENT',
+        'total_cost': 'TOTAL_COST_CURRENT',
+    }
+    cities = sorted(processed_df['CITY'].dropna().unique())
+    base_feature_cols = [
+        c for c in preprocessor.get_feature_columns() if c not in {'CITY', 'CITY_NUM'}
+    ]
+
+    rows = []
+    for city in cities:
+        train_df, test_df = create_city_train_test_split(
+            processed_df,
+            test_city=city,
+            city_column='CITY',
+            drop_city_from_features=False
+        )
+
+        model_factory = SurrogateModelFactory('gradient_boosting')
+        model_factory.create_all_models()
+        model_factory.fit_all(train_df, base_feature_cols)
+
+        for target, target_col in targets.items():
+            model = model_factory.models.get(target)
+            if model is None or not model._fitted or target_col not in test_df.columns:
+                continue
+
+            valid_df = test_df[test_df[target_col].notna()]
+            if valid_df.empty:
+                continue
+
+            pred = model.predict(valid_df[base_feature_cols])
+            actual = valid_df[target_col].values
+
+            rows.append({
+                'city': city,
+                'target': target,
+                'R2': r2_score(actual, pred),
+                'MAE': mean_absolute_error(actual, pred),
+                'RMSE': np.sqrt(mean_squared_error(actual, pred)),
+                'N': len(valid_df)
+            })
+
+    loco_df = pd.DataFrame(rows)
+    out_path = output_dir / 'table5_2_leave_one_city_out.csv'
+    loco_df.to_csv(out_path, index=False)
+    print(f"Saved: {out_path.name}")
+    if not loco_df.empty:
+        print("\nLOCO metrics:")
+        print(loco_df.to_string(index=False))
+
+    return loco_df
 
 
 # =============================================================================
@@ -945,7 +1031,18 @@ def main():
     print("=" * 70)
     
     # Load data
-    certs_df, recs_df, processed_df, train_df, test_df, preprocessor = load_and_prepare_data()
+    print(f"Split mode: {SPLIT_MODE}")
+    if SPLIT_MODE == 'city':
+        print(f"Test city: {TEST_CITY}")
+        print(f"Leave-One-City-Out: {LEAVE_ONE_CITY_OUT}")
+
+    certs_df, recs_df, processed_df, train_df, test_df, preprocessor = load_and_prepare_data(
+        split_mode=SPLIT_MODE,
+        test_city=TEST_CITY,
+    )
+
+    if SPLIT_MODE == 'city' and LEAVE_ONE_CITY_OUT:
+        run_leave_one_city_out_analysis(processed_df, preprocessor, OUTPUT_DIR)
     
     # Chapter 3: EDA
     summary_df = chapter3_eda(processed_df, OUTPUT_DIR)

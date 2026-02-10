@@ -461,3 +461,44 @@ def create_train_test_split(
     test_df = df.iloc[test_idx].drop(columns=['_postcode_sector'])
     
     return train_df, test_df
+
+
+def create_city_train_test_split(
+    df: pd.DataFrame,
+    test_city: str,
+    city_column: str = 'CITY',
+    drop_city_from_features: bool = False
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Create train/test split using city holdout.
+
+    Args:
+        df: DataFrame to split
+        test_city: City name to hold out as test set
+        city_column: Column containing city names
+        drop_city_from_features: If True, remove city columns from both splits
+
+    Returns:
+        Tuple of (train_df, test_df)
+    """
+    if city_column not in df.columns:
+        raise ValueError(f"City column '{city_column}' not found in DataFrame")
+
+    split_df = df.copy()
+    test_df = split_df[split_df[city_column] == test_city].copy()
+    train_df = split_df[split_df[city_column] != test_city].copy()
+
+    if test_df.empty:
+        available_cities = sorted(split_df[city_column].dropna().unique().tolist())
+        raise ValueError(
+            f"No rows found for test city '{test_city}'. "
+            f"Available cities: {available_cities}"
+        )
+
+    if drop_city_from_features:
+        cols_to_drop = [col for col in [city_column, 'CITY_NUM'] if col in split_df.columns]
+        if cols_to_drop:
+            train_df = train_df.drop(columns=cols_to_drop)
+            test_df = test_df.drop(columns=cols_to_drop)
+
+    return train_df, test_df
