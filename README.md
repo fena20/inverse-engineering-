@@ -93,6 +93,15 @@ python src/analysis/thesis_analysis_fast.py
 python src/example_usage.py
 ```
 
+### ۳-ب. تولید نمودار سناریوهای سفارشی | Generate Custom Scenario Chart
+
+```bash
+python src/analysis/scenario_pareto.py
+```
+
+> برای ورودی سفارشی CSV (با ستون‌های فارسی):
+> `python src/analysis/scenario_pareto.py --input my_scenarios.csv`
+
 ### ۴. راه‌اندازی API | Start API Server
 
 ```bash
