@@ -12,6 +12,7 @@ from itertools import combinations
 
 from ..utils.constants import IMPROVEMENT_CATEGORIES
 from ..utils.helpers import parse_cost_range, get_average_cost
+from ..data.preprocessor import DataPreprocessor
 
 
 @dataclass
@@ -49,6 +50,7 @@ class RetrofitPackage:
     predicted_carbon_reduction: float = 0
     predicted_cost_savings: float = 0
     payback_years: Optional[float] = None
+    target_met: bool = False
     
     def __post_init__(self):
         if self.measures:
@@ -67,7 +69,8 @@ class RetrofitPackage:
             'predicted_energy_reduction_pct': self.predicted_energy_reduction,
             'predicted_carbon_reduction_pct': self.predicted_carbon_reduction,
             'predicted_annual_savings': self.predicted_cost_savings,
-            'payback_years': self.payback_years
+            'payback_years': self.payback_years,
+            'target_met': self.target_met
         }
 
 
@@ -141,7 +144,7 @@ class OptimizationEngine:
     Features:
     - Discrete optimization over measure combinations
     - Cost-benefit analysis
-    - Physics-informed measure effect estimation
+    - Physics-informed measure effect estimation (Model-Based)
     - Multi-objective optimization (cost vs. reduction)
     """
     
@@ -155,15 +158,14 @@ class OptimizationEngine:
         self.model_factory = model_factory
         self.recommendation_db = RecommendationDatabase()
         
-        # Effect estimates for each measure category (% reduction in energy)
-        # These are physics-based estimates from typical improvements
+        # Effect estimates for each measure category
+        # Used for defining feature updates and fallback values
         self.measure_effects = {
             'wall_insulation': {
-                'energy_reduction': 0.20,  # 20% reduction in envelope losses
+                'energy_reduction': 0.20,
                 'carbon_reduction': 0.18,
                 'features_affected': {
                     'WALLS_ENERGY_EFF_NUM': 4,  # Improve to Good
-                    'ENVELOPE_QUALITY': 0.3  # Improvement
                 }
             },
             'roof_insulation': {
@@ -171,7 +173,6 @@ class OptimizationEngine:
                 'carbon_reduction': 0.09,
                 'features_affected': {
                     'ROOF_ENERGY_EFF_NUM': 4,
-                    'ENVELOPE_QUALITY': 0.2
                 }
             },
             'floor_insulation': {
@@ -179,7 +180,6 @@ class OptimizationEngine:
                 'carbon_reduction': 0.04,
                 'features_affected': {
                     'FLOOR_ENERGY_EFF_NUM': 4,
-                    'ENVELOPE_QUALITY': 0.1
                 }
             },
             'windows': {
@@ -188,7 +188,6 @@ class OptimizationEngine:
                 'features_affected': {
                     'WINDOWS_ENERGY_EFF_NUM': 4,
                     'GLAZED_TYPE_NUM': 3,
-                    'ENVELOPE_QUALITY': 0.15
                 }
             },
             'boiler': {
@@ -196,7 +195,6 @@ class OptimizationEngine:
                 'carbon_reduction': 0.12,
                 'features_affected': {
                     'MAINHEAT_ENERGY_EFF_NUM': 5,
-                    'SYSTEM_EFFICIENCY': 0.3
                 }
             },
             'heating_controls': {
@@ -204,7 +202,6 @@ class OptimizationEngine:
                 'carbon_reduction': 0.04,
                 'features_affected': {
                     'MAINHEATC_ENERGY_EFF_NUM': 4,
-                    'SYSTEM_EFFICIENCY': 0.1
                 }
             },
             'lighting': {
@@ -228,7 +225,6 @@ class OptimizationEngine:
                 'carbon_reduction': 0.20,
                 'features_affected': {
                     'PHOTO_SUPPLY': 30,  # 30% of roof
-                    'RENEWABLE_FRACTION': 0.3
                 }
             },
             'heat_pump': {
@@ -236,7 +232,6 @@ class OptimizationEngine:
                 'carbon_reduction': 0.40,
                 'features_affected': {
                     'MAINHEAT_ENERGY_EFF_NUM': 5,
-                    'SYSTEM_EFFICIENCY': 0.5
                 }
             },
             'draught_proofing': {
@@ -258,71 +253,133 @@ class OptimizationEngine:
         measures: List[RetrofitMeasure]
     ) -> Dict[str, float]:
         """
-        Estimate the effect of retrofit measures on a building.
+        Estimate the effect of retrofit measures on a building using Model-Based Counterfactuals.
         
-        Uses physics-based estimates combined with model predictions
-        when available.
+        1. Modifies the building profile features based on measures.
+        2. Re-calculates derived physics features.
+        3. Predicts new performance using trained surrogate models.
         
         Args:
             building_profile: Series with building features
             measures: List of measures to apply
         
         Returns:
-            Dictionary with estimated reductions
+            Dictionary with estimated reductions and new values
         """
-        # Start with base profile - try different column names
+        # Start with base profile values
         current_energy = building_profile.get('ENERGY_CONSUMPTION_CURRENT', 
                         building_profile.get('ENERGY_INTENSITY', 200))
         current_carbon = building_profile.get('CO2_EMISS_CURR_PER_FLOOR_AREA', 40)
         
-        # Calculate current cost from individual components if not available
-        heating = building_profile.get('HEATING_COST_CURRENT', 500)
-        hot_water = building_profile.get('HOT_WATER_COST_CURRENT', 150)
-        lighting = building_profile.get('LIGHTING_COST_CURRENT', 100)
-        current_cost = building_profile.get('TOTAL_COST_CURRENT', heating + hot_water + lighting)
-        
-        # Ensure we have a reasonable cost value
-        if current_cost <= 0:
-            # Estimate from floor area (typical £10-15/m² annual energy cost)
-            floor_area = building_profile.get('TOTAL_FLOOR_AREA', 80)
-            current_cost = floor_area * 12  # £12/m² average
-        
-        # Calculate cumulative effect (not strictly additive due to diminishing returns)
-        total_energy_reduction = 0
-        total_carbon_reduction = 0
+        # Calculate current cost
+        current_cost = building_profile.get('TOTAL_COST_CURRENT')
+        if not current_cost or pd.isna(current_cost):
+             heating = building_profile.get('HEATING_COST_CURRENT', 500)
+             hot_water = building_profile.get('HOT_WATER_COST_CURRENT', 150)
+             lighting = building_profile.get('LIGHTING_COST_CURRENT', 100)
+             current_cost = heating + hot_water + lighting
+             if current_cost <= 0 or pd.isna(current_cost):
+                 current_cost = building_profile.get('TOTAL_FLOOR_AREA', 80) * 12
+
+        # 1. Prepare modified profile
+        # Convert to dict for easier modification, then to DataFrame
+        modified_profile_dict = building_profile.to_dict()
         
         applied_categories = set()
+        rule_based_energy_reduction = 0
+        rule_based_carbon_reduction = 0
         
         for measure in measures:
             if measure.category in applied_categories:
-                continue  # Don't double-count same category
+                continue
             
             effects = self.measure_effects.get(measure.category, {})
+            
+            # Apply feature updates (Counterfactual)
+            if 'features_affected' in effects:
+                for feature, value in effects['features_affected'].items():
+                    # Special handling for proxies/deltas
+                    if feature == 'INFILTRATION_PROXY':
+                        # This will be handled after physics feature recalculation
+                        pass
+                    elif feature in ['ENVELOPE_QUALITY', 'SYSTEM_EFFICIENCY', 'RENEWABLE_FRACTION']:
+                        # Ignore these, they will be recalculated from raw inputs
+                        pass
+                    elif feature == 'PHOTO_SUPPLY' and modified_profile_dict.get(feature, 0) > value:
+                        # Don't downgrade existing solar
+                        pass
+                    else:
+                        # Update raw feature (e.g., WALLS_ENERGY_EFF_NUM = 4)
+                        modified_profile_dict[feature] = value
+            
+            # Track rule-based for fallback
             energy_red = effects.get('energy_reduction', 0.05)
             carbon_red = effects.get('carbon_reduction', 0.05)
-            
-            # Apply diminishing returns
-            remaining_energy = 1 - total_energy_reduction
-            remaining_carbon = 1 - total_carbon_reduction
-            
-            total_energy_reduction += energy_red * remaining_energy
-            total_carbon_reduction += carbon_red * remaining_carbon
+            remaining_energy = 1 - rule_based_energy_reduction
+            remaining_carbon = 1 - rule_based_carbon_reduction
+            rule_based_energy_reduction += energy_red * remaining_energy
+            rule_based_carbon_reduction += carbon_red * remaining_carbon
             
             applied_categories.add(measure.category)
+
+        # 2. Re-calculate derived physics features
+        temp_df = pd.DataFrame([modified_profile_dict])
+
+        # Use DataPreprocessor to update derived features (ENVELOPE_QUALITY, etc.)
+        pp = DataPreprocessor()
+        temp_df = pp.add_physics_features(temp_df)
         
-        # Cap at realistic maximum
-        total_energy_reduction = min(total_energy_reduction, 0.70)
-        total_carbon_reduction = min(total_carbon_reduction, 0.80)
+        # 3. Apply manual overrides for non-raw features (e.g. draught proofing)
+        for measure in measures:
+             effects = self.measure_effects.get(measure.category, {})
+             if 'features_affected' in effects:
+                  for feature, value in effects['features_affected'].items():
+                       if feature == 'INFILTRATION_PROXY':
+                            # Additive effect
+                            current_val = temp_df[feature].iloc[0]
+                            temp_df[feature] = current_val + value
+
+        # 4. Model Prediction
+        if self.model_factory:
+             try:
+                 # Use correct feature columns
+                 X = temp_df[self.model_factory.feature_columns].fillna(0)
+
+                 new_energy = self.model_factory.models['energy'].predict(X)[0]
+                 new_carbon = self.model_factory.models['carbon'].predict(X)[0]
+                 new_cost = self.model_factory.models['total_cost'].predict(X)[0]
+
+                 # Sanity check
+                 new_energy = max(10, new_energy) # Min 10 kWh/m2
+                 new_carbon = max(1, new_carbon)
+                 new_cost = max(50, new_cost)
+
+                 # Calculate reductions
+                 energy_red_pct = max(0, (current_energy - new_energy) / current_energy * 100)
+                 carbon_red_pct = max(0, (current_carbon - new_carbon) / current_carbon * 100)
+                 cost_savings = max(0, current_cost - new_cost)
+
+                 return {
+                     'energy_reduction_pct': energy_red_pct,
+                     'carbon_reduction_pct': carbon_red_pct,
+                     'new_energy_intensity': new_energy,
+                     'new_carbon_intensity': new_carbon,
+                     'annual_cost_savings': cost_savings
+                 }
+             except Exception as e:
+                 # print(f"Prediction failed: {e}")
+                 pass
         
-        # Estimate cost savings (proportional to energy reduction)
-        cost_savings = current_cost * total_energy_reduction
+        # Fallback to rule-based
+        rule_based_energy_reduction = min(rule_based_energy_reduction, 0.70)
+        rule_based_carbon_reduction = min(rule_based_carbon_reduction, 0.80)
         
         return {
-            'energy_reduction_pct': total_energy_reduction * 100,
-            'carbon_reduction_pct': total_carbon_reduction * 100,
-            'new_energy_intensity': current_energy * (1 - total_energy_reduction),
-            'new_carbon_intensity': current_carbon * (1 - total_carbon_reduction),
-            'annual_cost_savings': cost_savings
+            'energy_reduction_pct': rule_based_energy_reduction * 100,
+            'carbon_reduction_pct': rule_based_carbon_reduction * 100,
+            'new_energy_intensity': current_energy * (1 - rule_based_energy_reduction),
+            'new_carbon_intensity': current_carbon * (1 - rule_based_carbon_reduction),
+            'annual_cost_savings': current_cost * rule_based_energy_reduction
         }
     
     def get_applicable_measures(
@@ -452,14 +509,20 @@ class OptimizationEngine:
         packages = []
         
         # Try all combinations up to max_measures
-        for n in range(1, min(max_measures + 1, len(applicable_measures) + 1)):
+        # Limit total combinations to avoid combinatorial explosion
+        # If too many measures, limit n
+        max_n = max_measures
+        if len(applicable_measures) > 15:
+             max_n = min(max_measures, 3)
+
+        for n in range(1, min(max_n + 1, len(applicable_measures) + 1)):
             for measure_combo in combinations(applicable_measures, n):
                 # Skip if over budget
                 total_cost = sum(m.cost_avg for m in measure_combo)
                 if max_budget and total_cost > max_budget:
                     continue
                 
-                # Estimate effect
+                # Estimate effect (Model-Based)
                 effects = self.estimate_improvement_effect(
                     building_profile,
                     list(measure_combo)
@@ -476,6 +539,10 @@ class OptimizationEngine:
                     predicted_cost_savings=cost_savings
                 )
                 
+                # Check if target met
+                target_key = 'predicted_carbon_reduction_pct' if target_type == 'carbon' else 'predicted_energy_reduction_pct'
+                package.target_met = (package.to_dict()[target_key] >= target_reduction)
+
                 # Calculate payback
                 if cost_savings > 0:
                     package.payback_years = package.total_cost_avg / cost_savings
@@ -492,8 +559,9 @@ class OptimizationEngine:
         # Sort by cost (ascending)
         valid_packages.sort(key=lambda p: p.total_cost_avg)
         
-        # If no packages meet target, return best available
+        # If no packages meet target, return best available (closest to target)
         if not valid_packages:
+            # Sort by reduction descending
             packages.sort(
                 key=lambda p: (
                     p.predicted_carbon_reduction if target_type == 'carbon' 
@@ -532,8 +600,13 @@ class OptimizationEngine:
             profile = building_profile.copy()
             profile[feature] = value
             
+            # Recalculate physics features! (Important for consistency)
+            temp_df = pd.DataFrame([profile])
+            pp = DataPreprocessor()
+            temp_df = pp.add_physics_features(temp_df)
+
             # Get predictions
-            X = pd.DataFrame([profile])[self.model_factory.feature_columns]
+            X = temp_df[self.model_factory.feature_columns].fillna(0)
             predictions = self.model_factory.predict(X)
             
             result = {'feature_value': value}
@@ -567,7 +640,8 @@ class OptimizationEngine:
                 'Energy Reduction': f"{pkg.predicted_energy_reduction:.1f}%",
                 'Carbon Reduction': f"{pkg.predicted_carbon_reduction:.1f}%",
                 'Annual Savings': f"£{pkg.predicted_cost_savings:,.0f}",
-                'Payback (years)': f"{pkg.payback_years:.1f}" if pkg.payback_years else "N/A"
+                'Payback (years)': f"{pkg.payback_years:.1f}" if pkg.payback_years else "N/A",
+                'Target Met': 'Yes' if pkg.target_met else 'No'
             })
         
         return pd.DataFrame(data)
