@@ -645,6 +645,60 @@ def generate_tables(df, model_factory, test_df, feature_cols, output_dir):
     print(f"  Saved: table5_1_model_accuracy.csv")
 
 
+def generate_loco_city_evaluation(processed_df, preprocessor, output_dir):
+    """Generate leave-one-city-out (LOCO) evaluation table for anti-leakage robustness."""
+    print("\n[Table 5.2] Leave-One-City-Out Evaluation...")
+
+    from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+    from retrofit_dss.models.surrogate import SurrogateModelFactory
+
+    feature_cols = preprocessor.get_feature_columns()
+    cities = sorted(processed_df['CITY'].dropna().unique())
+    targets = [
+        ('energy', 'ENERGY_CONSUMPTION_CURRENT'),
+        ('carbon', 'CO2_EMISS_CURR_PER_FLOOR_AREA'),
+        ('heating_cost', 'HEATING_COST_CURRENT'),
+        ('total_cost', 'TOTAL_COST_CURRENT')
+    ]
+
+    rows = []
+    for holdout_city in cities:
+        train_df = processed_df[processed_df['CITY'] != holdout_city].copy()
+        test_df = processed_df[processed_df['CITY'] == holdout_city].copy()
+
+        if len(train_df) == 0 or len(test_df) == 0:
+            continue
+
+        model_factory = SurrogateModelFactory('gradient_boosting')
+        model_factory.create_all_models()
+        model_factory.fit_all(train_df, feature_cols)
+
+        for model_name, target_col in targets:
+            model = model_factory.models.get(model_name)
+            if model is None or not model._fitted:
+                continue
+
+            valid = test_df[test_df[target_col].notna()]
+            if len(valid) < 50:
+                continue
+
+            pred = model.predict(valid[feature_cols])
+            actual = valid[target_col].values
+
+            rows.append({
+                'Holdout City': holdout_city,
+                'Target': model_name,
+                'R²': r2_score(actual, pred),
+                'MAE': mean_absolute_error(actual, pred),
+                'RMSE': np.sqrt(mean_squared_error(actual, pred)),
+                'N': len(valid)
+            })
+
+    output_path = output_dir / 'table5_2_loco_city_holdout.csv'
+    pd.DataFrame(rows).to_csv(output_path, index=False)
+    print(f"  Saved: {output_path.name}")
+
+
 def main():
     """Main analysis."""
     print("=" * 70)
@@ -675,6 +729,7 @@ def main():
     fig6_2_sensitivity(model_factory, test_df, feature_cols, OUTPUT_DIR)
     fig7_case_studies(model_factory, test_df, recs_df, feature_cols, OUTPUT_DIR)
     generate_tables(processed_df, model_factory, test_df, feature_cols, OUTPUT_DIR)
+    generate_loco_city_evaluation(processed_df, preprocessor, OUTPUT_DIR)
     
     print("\n" + "=" * 70)
     print("ANALYSIS COMPLETE")
